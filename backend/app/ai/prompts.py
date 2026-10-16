@@ -1,25 +1,22 @@
 VISION_PROMPT = """
-You are an AI system for a college campus complaint application.
+Inspect this campus maintenance image.
+Identify the single most important visible problem.
+Do not speculate about damage that cannot be seen.
 
-Analyze this image specifically to identify the PRIMARY campus maintenance
-problem that should be reported.
-
-Important rules:
-- Look at the entire image carefully.
-- Identify damaged, broken, unsafe, or malfunctioning objects.
-- Prioritize functional or safety-related problems over cosmetic issues.
-- If a damaged object is clearly visible, identify that object as the
-  primary issue.
-- Do not choose a minor cosmetic issue when a more important damaged
-  object is present.
-
-Return ONLY valid JSON:
-
+Return one JSON object only, with no reasoning:
 {
-  "issue": "short name of the primary problem",
-  "category": "Electrical Maintenance / Civil Maintenance / Plumbing / Furniture Maintenance / Cleaning & Sanitation / IT & Networking / General Maintenance",
-  "severity": "low / medium / high / critical",
-  "description": "short explanation of the problem",
-  "confidence": 0.0
+  "issue": "short problem name",
+  "category": "Electrical Maintenance",
+  "severity": "low",
+  "description": "one short sentence",
+  "confidence": 0.9
 }
+
+Choose category from:
+Electrical Maintenance, Civil Maintenance, Plumbing,
+Furniture Maintenance, Cleaning & Sanitation, IT & Networking,
+General Maintenance.
+
+Choose severity from: low, medium, high, critical.
+Set confidence to a number from 0.0 to 1.0.
 """
