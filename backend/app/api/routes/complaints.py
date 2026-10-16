@@ -6,7 +6,10 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 
 from app.database.database import supabase
 from app.ai.vision import analyze_image
-
+from app.services.complaint_service import (
+    get_complaint,
+    get_complaint_history,
+)
 router = APIRouter(prefix="/complaints", tags=["Complaints"])
 
 
@@ -146,3 +149,17 @@ async def upload_image(
             status_code=500,
             detail=str(e)
         )
+
+
+
+@router.get("/{complaint_id}/history")
+def complaint_history(complaint_id: str):
+    return {
+        "complaint_id": complaint_id,
+        "history": get_complaint_history(complaint_id),
+    }
+
+
+@router.get("/{complaint_id}")
+def complaint_details(complaint_id: str):
+    return get_complaint(complaint_id)
