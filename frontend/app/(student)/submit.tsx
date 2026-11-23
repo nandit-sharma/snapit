@@ -1,14 +1,16 @@
-import React, { useState, useCallback } from 'react';
+
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   ScrollView,
   Image,
   TouchableOpacity,
-  Alert,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,30 +28,73 @@ import {
 import { complaintService } from '../../src/services/complaintService';
 import { Button } from '../../src/components/Button';
 import { Header } from '../../src/components/Header';
+import {
+  FeedbackModal,
+  FeedbackModalProps,
+} from '../../src/components/FeedbackModal';
 import { colors, radii, spacing, typography } from '../../src/theme';
+
+const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
 
 export default function SubmitComplaintScreen() {
   const router = useRouter();
 
   const [imageUri, setImageUri] = useState<string | null>(null);
+
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
-  const [locationLoading, setLocationLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
 
-  // Restore any pending camera result every time this screen gains focus.
-  // On Android, Expo Go's JS engine can be killed while the native camera
-  // activity is open (memory pressure). getPendingResultAsync() retrieves
-  // the captured photo when the app resumes. Using useFocusEffect (not
-  // useEffect) ensures this runs every time we come back to this screen,
-  // not just on first mount.
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [errorMessage, setErrorMessage] = useState('');
+  const [feedbackModal, setFeedbackModal] =
+    useState<FeedbackModalProps | null>(null);
+
+  // AI analysis and editable student values
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [departments, setDepartments] = useState<any[]>([]);
+
+  const [issueType, setIssueType] = useState('');
+  const [departmentName, setDepartmentName] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
+  const [severity, setSeverity] = useState<string>('medium');
+  const [description, setDescription] = useState('');
+
+  // Capture GPS when the screen opens
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } =
+          await Location.requestForegroundPermissionsAsync();
+
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          }).catch(() => null);
+
+          if (loc?.coords) {
+            setLatitude(loc.coords.latitude);
+            setLongitude(loc.coords.longitude);
+          }
+        }
+      } catch {
+        // GPS is optional
+      }
+    })();
+  }, []);
+
+  // Restore a pending camera result when returning to this screen
   useFocusEffect(
     useCallback(() => {
       let active = true;
+
       const restorePendingImage = async () => {
         try {
-          const pending = (await ImagePicker.getPendingResultAsync()) as any;
+          const pending =
+            (await ImagePicker.getPendingResultAsync()) as any;
+
           if (
             active &&
             pending &&
@@ -59,67 +104,97 @@ export default function SubmitComplaintScreen() {
             pending.assets.length > 0
           ) {
             const firstAsset = pending.assets[0];
+
             if (firstAsset?.uri) {
               setImageUri(firstAsset.uri);
+              resetAnalysis();
               setErrorMessage('');
             }
           }
-        } catch (err) {
-          // Not critical — ignore silently
+        } catch {
+          // Ignore pending camera restoration errors
         }
       };
 
       restorePendingImage();
-      return () => { active = false; };
+
+      return () => {
+        active = false;
+      };
     }, [])
   );
 
-  // Capture a photo using the camera
+  const resetAnalysis = () => {
+    setAnalysisResult(null);
+    setIssueType('');
+    setDepartmentName('');
+    setDepartmentId('');
+    setSeverity('medium');
+    setDescription('');
+  };
+
+  // Camera
   const pickFromCamera = async () => {
     try {
+      console.log('CAMERA: requesting permission');
       const permission =
         await ImagePicker.requestCameraPermissionsAsync();
 
       if (!permission.granted) {
-        Alert.alert(
-          'Permission Denied',
-          'Camera permission is required to capture photos.'
-        );
+        setFeedbackModal({
+          visible: true,
+          type: 'warning',
+          title: 'Camera Permission',
+          message:
+            'Camera permission is required to capture campus issues.',
+          primaryButton: {
+            text: 'Got It',
+            onPress: () => setFeedbackModal(null),
+          },
+        });
         return;
       }
-
-      // Setting allowsEditing to false prevents Android from launching a heavy cropper activity
-      // which kills Expo Go due to OS memory constraints.
+      console.log('CAMERA: launching native camera');
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
         allowsEditing: false,
         quality: 0.7,
       });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
+      console.log('CAMERA: returned from native camera', result);
+      if (!result.canceled && result.assets?.length > 0) {
         setImageUri(result.assets[0].uri);
+        resetAnalysis();
         setErrorMessage('');
       }
-    } catch (err: any) {
+    } catch (err) {
+      console.error('CAMERA ERROR:', err);
       console.warn('Camera error:', err);
+
       Alert.alert(
         'Camera Notice',
-        'Could not open camera directly. You can also pick a photo from your gallery.'
+        'Could not open camera directly. You can also select a photo from your gallery.'
       );
     }
   };
 
-  // Select a photo from the gallery
+  // Gallery
   const pickFromGallery = async () => {
     try {
       const permission =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permission.granted) {
-        Alert.alert(
-          'Permission Denied',
-          'Gallery permission is required to select photos.'
-        );
+        setFeedbackModal({
+          visible: true,
+          type: 'warning',
+          title: 'Gallery Permission',
+          message:
+            'Gallery permission is required to select a photo.',
+          primaryButton: {
+            text: 'Got It',
+            onPress: () => setFeedbackModal(null),
+          },
+        });
         return;
       }
 
@@ -129,12 +204,14 @@ export default function SubmitComplaintScreen() {
         quality: 0.7,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
+      if (!result.canceled && result.assets?.length > 0) {
         setImageUri(result.assets[0].uri);
+        resetAnalysis();
         setErrorMessage('');
       }
-    } catch (err: any) {
+    } catch (err) {
       console.warn('Gallery error:', err);
+
       Alert.alert(
         'Gallery Notice',
         'Could not open the image library.'
@@ -142,18 +219,24 @@ export default function SubmitComplaintScreen() {
     }
   };
 
-  // Capture the current GPS coordinates safely without blocking submission
-  const captureGPSLocation = async (): Promise<{ latitude: number | null; longitude: number | null }> => {
+  // Capture GPS coordinates
+  const captureGPSLocation = async (): Promise<{
+    latitude: number | null;
+    longitude: number | null;
+  }> => {
     try {
       setLocationLoading(true);
 
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } =
+        await Location.requestForegroundPermissionsAsync();
+
       if (status !== 'granted') {
         return { latitude: null, longitude: null };
       }
 
-      // Try fast last-known position first, then try fresh position with 5s timeout
-      const lastKnown = await Location.getLastKnownPositionAsync().catch(() => null);
+      const lastKnown =
+        await Location.getLastKnownPositionAsync().catch(() => null);
+
       if (lastKnown) {
         setLatitude(lastKnown.coords.latitude);
         setLongitude(lastKnown.coords.longitude);
@@ -167,13 +250,18 @@ export default function SubmitComplaintScreen() {
         setTimeout(() => resolve(null), 5000)
       );
 
-      const location = await Promise.race([locationPromise, timeoutPromise]);
+      const location = await Promise.race([
+        locationPromise,
+        timeoutPromise,
+      ]);
 
       if (location && 'coords' in location) {
         const lat = location.coords.latitude;
         const long = location.coords.longitude;
+
         setLatitude(lat);
         setLongitude(long);
+
         return { latitude: lat, longitude: long };
       }
 
@@ -192,13 +280,125 @@ export default function SubmitComplaintScreen() {
     }
   };
 
-  // Submit the complaint to the backend
-  const handleSubmit = async () => {
+  // Analyze image using backend and Ollama
+  const handleAnalyze = async () => {
     setErrorMessage('');
 
     if (!imageUri) {
       setErrorMessage(
-        'Please capture or select an image of the campus issue.'
+        'Please capture or select an image first.'
+      );
+      return;
+    }
+
+    if (isAnalyzing) return;
+
+    setIsAnalyzing(true);
+
+    try {
+      // Load department list for validating student edits
+      const departmentList =
+        await complaintService.getDepartments();
+
+      setDepartments(departmentList || []);
+
+      const gps = await captureGPSLocation();
+
+      const result = await complaintService.analyzeComplaint({
+        imageUri,
+        latitude: gps.latitude ?? undefined,
+        longitude: gps.longitude ?? undefined,
+      });
+
+      setAnalysisResult(result);
+
+      const ai = result.ai_analysis as {
+        issue?: string;
+        issue_type?: string;
+        category?: string;
+        department?: string;
+        description?: string;
+        severity?: string;
+        confidence?: number | string;
+      };
+
+      const detectedDepartment =
+        ai.category ||
+        ai.department ||
+        'General Maintenance';
+
+      setIssueType(ai.issue || ai.issue_type || '');
+      setDepartmentName(detectedDepartment);
+      setDepartmentId(result.department_id || '');
+      setSeverity(
+        String(ai.severity || 'medium').toLowerCase()
+      );
+      setDescription(ai.description || '');
+
+    } catch (error: any) {
+      console.warn('AI analysis error:', error);
+
+      setErrorMessage(
+        error?.message ||
+          'Could not analyze the image. Please check your connection and try again.'
+      );
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Resolve the department ID from the editable department name
+  const getSelectedDepartmentId = () => {
+    const selected = departments.find((department) => {
+      const name = String(
+        department.name || department.department_name || ''
+      );
+
+      return (
+        name.trim().toLowerCase() ===
+        departmentName.trim().toLowerCase()
+      );
+    });
+
+    return selected?.id || departmentId;
+  };
+
+  // Submit student-confirmed complaint
+  const handleSubmit = async () => {
+    setErrorMessage('');
+
+    if (!imageUri || !analysisResult?.image_url) {
+      setErrorMessage(
+        'Please select an image and analyze it before submitting.'
+      );
+      return;
+    }
+
+    if (!issueType.trim()) {
+      setErrorMessage('Please enter the issue type.');
+      return;
+    }
+
+    if (!departmentName.trim()) {
+      setErrorMessage('Please enter the department.');
+      return;
+    }
+
+    if (!description.trim()) {
+      setErrorMessage('Please enter a description.');
+      return;
+    }
+
+    if (!SEVERITIES.includes(severity as any)) {
+      setErrorMessage('Please select a valid severity.');
+      return;
+    }
+
+    const selectedDepartmentId = getSelectedDepartmentId();
+
+    if (!selectedDepartmentId) {
+      setErrorMessage(
+        'The selected department could not be matched. Please choose a valid department name.'
       );
       return;
     }
@@ -211,34 +411,74 @@ export default function SubmitComplaintScreen() {
       const gps = await captureGPSLocation();
 
       const result = await complaintService.submitComplaint({
-        imageUri,
+        image_url: analysisResult.image_url,
+        department_id: selectedDepartmentId,
+        issue_type: issueType.trim(),
+        description: description.trim(),
+        severity: severity.toLowerCase(),
+        ai_analysis: analysisResult.ai_analysis,
         latitude: gps.latitude,
         longitude: gps.longitude,
       });
 
-      const complaint = result.complaint;
-      const severity =
-        complaint.ai_analysis?.severity || complaint.severity || 'medium';
+      // Support either a direct complaint response or wrapped response
+      const complaint = result.complaint || result;
 
-      Alert.alert(
-        'Complaint Registered!',
-        `Your complaint has been submitted successfully.\n\nTicket ID: ${complaint.id}\nAI-detected severity: ${String(severity).toUpperCase()}`,
-        [
+      const locationLabel =
+        gps.latitude !== null && gps.longitude !== null
+          ? `Lat: ${gps.latitude.toFixed(4)}, Long: ${gps.longitude.toFixed(4)}`
+          : 'Campus Grounds';
+
+      setFeedbackModal({
+        visible: true,
+        type: 'celebration',
+        title: 'Complaint Registered! 🎉',
+        message:
+          'Your complaint has been submitted successfully.',
+        badgeText: 'Ticket Created',
+        details: [
           {
-            text: 'View Complaint',
-            onPress: () =>
-              router.replace(`/complaint/${complaint.id}` as any),
+            label: 'Ticket ID',
+            value: `#${String(complaint.id).slice(0, 10)}`,
+            icon: 'id',
           },
           {
-            text: 'Back to Dashboard',
-            onPress: () => router.replace('/(student)/home'),
+            label: 'Department',
+            value: departmentName,
+            icon: 'department',
           },
-        ]
-      );
+          {
+            label: 'Priority',
+            value: severity.toUpperCase(),
+            icon: 'severity',
+          },
+          {
+            label: 'Location Mark',
+            value: locationLabel,
+            icon: 'location',
+          },
+        ],
+        primaryButton: {
+          text: 'View Complaint Details',
+          onPress: () => {
+            setFeedbackModal(null);
+            router.push(`/complaint/${complaint.id}` as any);
+          },
+        },
+        secondaryButton: {
+          text: 'Back to Dashboard',
+          onPress: () => {
+            setFeedbackModal(null);
+            router.replace('/(student)/home');
+          },
+        },
+      });
     } catch (error: any) {
-      console.warn('Upload error:', error);
+      console.warn('Complaint submission error:', error);
+
       setErrorMessage(
-        error?.message || 'Failed to submit complaint. Please check your connection and try again.'
+        error?.message ||
+          'Failed to submit complaint. Please try again.'
       );
     } finally {
       setIsSubmitting(false);
@@ -262,7 +502,9 @@ export default function SubmitComplaintScreen() {
         >
           {errorMessage ? (
             <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{errorMessage}</Text>
+              <Text style={styles.errorText}>
+                {errorMessage}
+              </Text>
             </View>
           ) : null}
 
@@ -284,19 +526,26 @@ export default function SubmitComplaintScreen() {
                   <TouchableOpacity
                     style={styles.actionPill}
                     onPress={pickFromCamera}
-                    disabled={isSubmitting}
+                    disabled={isAnalyzing || isSubmitting}
                   >
                     <Camera size={14} color="#FFFFFF" />
-                    <Text style={styles.actionPillText}>Retake</Text>
+                    <Text style={styles.actionPillText}>
+                      Retake
+                    </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
                     style={[styles.actionPill, styles.removePill]}
-                    onPress={() => setImageUri(null)}
-                    disabled={isSubmitting}
+                    onPress={() => {
+                      setImageUri(null);
+                      resetAnalysis();
+                    }}
+                    disabled={isAnalyzing || isSubmitting}
                   >
                     <Trash2 size={14} color="#FFFFFF" />
-                    <Text style={styles.actionPillText}>Remove</Text>
+                    <Text style={styles.actionPillText}>
+                      Remove
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -315,7 +564,7 @@ export default function SubmitComplaintScreen() {
                     activeOpacity={0.8}
                     onPress={pickFromCamera}
                     style={styles.pickerBtn}
-                    disabled={isSubmitting}
+                    disabled={isAnalyzing || isSubmitting}
                   >
                     <Camera size={20} color={colors.primary} />
                     <Text style={styles.pickerBtnText}>
@@ -327,7 +576,7 @@ export default function SubmitComplaintScreen() {
                     activeOpacity={0.8}
                     onPress={pickFromGallery}
                     style={[styles.pickerBtn, styles.galleryBtn]}
-                    disabled={isSubmitting}
+                    disabled={isAnalyzing || isSubmitting}
                   >
                     <ImageIcon
                       size={20}
@@ -352,12 +601,131 @@ export default function SubmitComplaintScreen() {
             </View>
 
             <Text style={styles.aiInfoDescription}>
-              After submission, our AI vision service will analyze
-              your photograph and automatically identify the issue,
-              generate its description, determine severity, and route
-              to the appropriate campus department.
+              Analyze your photograph using AI. Review and edit the
+              detected issue before submitting your complaint.
             </Text>
           </View>
+
+          {/* Analyze Button */}
+          <Button
+            title="Analyze with AI"
+            onPress={handleAnalyze}
+            loading={isAnalyzing}
+            disabled={!imageUri || isSubmitting}
+            variant="primary"
+            icon={<Sparkles size={18} color="#FFFFFF" />}
+            style={styles.submitBtn}
+          />
+
+          {/* Editable AI Results */}
+          {analysisResult ? (
+            <View style={styles.analysisCard}>
+              <View style={styles.analysisHeader}>
+                <Sparkles size={18} color={colors.aiBadge} />
+                <Text style={styles.analysisTitle}>
+                  AI Analysis Results
+                </Text>
+              </View>
+            <View style={styles.rawResponseBox}>
+              <Text style={styles.rawResponseTitle}>
+                Complete AI Response
+              </Text>
+
+              <Text selectable style={styles.rawResponseText}>
+                {JSON.stringify(
+                  analysisResult.ai_analysis ?? analysisResult,
+                  null,
+                  2
+                )}
+              </Text>
+            </View>
+              <Text style={styles.editHint}>
+                Review the AI predictions. You can edit these details
+                before submitting.
+              </Text>
+
+              <Text style={styles.fieldLabel}>Issue Type</Text>
+              <TextInput
+                value={issueType}
+                onChangeText={setIssueType}
+                placeholder="Enter issue type"
+                style={styles.textInput}
+              />
+
+              <Text style={styles.fieldLabel}>Department</Text>
+              <TextInput
+                value={departmentName}
+                onChangeText={setDepartmentName}
+                placeholder="Enter department name"
+                style={styles.textInput}
+              />
+
+              <Text style={styles.fieldLabel}>Severity</Text>
+              <View style={styles.severityRow}>
+                {SEVERITIES.map((item) => {
+                  const selected =
+                    severity.toLowerCase() === item;
+
+                  return (
+                    <TouchableOpacity
+                      key={item}
+                      onPress={() => setSeverity(item)}
+                      style={[
+                        styles.severityButton,
+                        selected && styles.severityButtonSelected,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.severityButtonText,
+                          selected &&
+                            styles.severityButtonTextSelected,
+                        ]}
+                      >
+                        {item.toUpperCase()}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.fieldLabel}>Description</Text>
+              <TextInput
+                value={description}
+                onChangeText={setDescription}
+                placeholder="Describe the campus issue"
+                multiline
+                textAlignVertical="top"
+                style={[styles.textInput, styles.descriptionInput]}
+              />
+
+              {analysisResult.ai_analysis?.confidence !== undefined ? (
+                <Text style={styles.confidenceText}>
+                  AI Confidence: {
+                    typeof analysisResult.ai_analysis.confidence === 'number'
+                      ? `${Math.round(
+                          analysisResult.ai_analysis.confidence <= 1
+                            ? analysisResult.ai_analysis.confidence * 100
+                            : analysisResult.ai_analysis.confidence
+                        )}%`
+                      : String(analysisResult.ai_analysis.confidence)
+                  }
+                </Text>
+              ) : null}
+
+              <Button
+                title="Confirm & Submit Complaint"
+                onPress={handleSubmit}
+                loading={isSubmitting}
+                disabled={isAnalyzing}
+                variant="primary"
+                icon={
+                  <CheckCircle size={18} color="#FFFFFF" />
+                }
+                style={styles.submitBtn}
+              />
+            </View>
+          ) : null}
 
           {/* GPS Location */}
           <View style={styles.locationCard}>
@@ -370,7 +738,7 @@ export default function SubmitComplaintScreen() {
                 </Text>
 
                 <Text style={styles.locationDescription}>
-                  Your current coordinates will be automatically recorded during submission.
+                  Your current coordinates will be recorded with your complaint.
                 </Text>
               </View>
             </View>
@@ -385,26 +753,25 @@ export default function SubmitComplaintScreen() {
               </Text>
             ) : (
               <Text style={styles.locationPending}>
-                GPS coordinates will be captured when submitting.
+                GPS coordinates will be captured when needed.
               </Text>
             )}
           </View>
 
-          {/* Submit Button */}
-          <Button
-            title="Submit Complaint"
-            onPress={handleSubmit}
-            loading={isSubmitting || locationLoading}
-            variant="primary"
-            icon={<CheckCircle size={18} color="#FFFFFF" />}
-            style={styles.submitBtn}
-          />
-
           <Text style={styles.footerNote}>
-            Your photograph and coordinates will be submitted for campus complaint resolution.
+            Your photograph and confirmed complaint details will be
+            submitted for campus complaint resolution.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {feedbackModal ? (
+        <FeedbackModal
+          {...feedbackModal}
+          visible={Boolean(feedbackModal)}
+          onClose={() => setFeedbackModal(null)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -421,6 +788,28 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: spacing.xxxl,
   },
+  rawResponseBox: {
+  backgroundColor: '#F8FAFC',
+  borderWidth: 1,
+  borderColor: colors.border,
+  borderRadius: radii.md,
+  padding: spacing.md,
+  marginBottom: spacing.md,
+},
+
+rawResponseTitle: {
+  fontSize: typography.sizes.sm,
+  fontWeight: typography.weights.bold,
+  color: colors.textPrimary,
+  marginBottom: spacing.sm,
+},
+
+rawResponseText: {
+  fontSize: typography.sizes.xs,
+  color: colors.textSecondary,
+  lineHeight: 20,
+  fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
+},
   errorBox: {
     backgroundColor: colors.severityCriticalBg,
     padding: spacing.md,
@@ -546,6 +935,82 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.xs + 1,
     color: colors.textSecondary,
     lineHeight: 19,
+  },
+  analysisCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginTop: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  analysisHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  analysisTitle: {
+    fontSize: typography.sizes.md,
+    fontWeight: typography.weights.bold,
+    color: colors.textPrimary,
+  },
+  editHint: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: spacing.md,
+  },
+  fieldLabel: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    color: colors.textPrimary,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  textInput: {
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    color: colors.textPrimary,
+    fontSize: typography.sizes.sm,
+  },
+  descriptionInput: {
+    minHeight: 100,
+  },
+  severityRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  severityButton: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  severityButtonSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  severityButtonText: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.semibold,
+  },
+  severityButtonTextSelected: {
+    color: '#FFFFFF',
+  },
+  confidenceText: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.xs,
+    marginTop: spacing.md,
   },
   locationCard: {
     backgroundColor: colors.surface,

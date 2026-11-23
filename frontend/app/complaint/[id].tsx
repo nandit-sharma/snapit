@@ -7,10 +7,13 @@ import {
   Image,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
+  BackHandler,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
 import {
   MapPin,
   Clock,
@@ -23,6 +26,8 @@ import {
   XCircle,
   AlertTriangle,
   User,
+  ExternalLink,
+  Navigation,
 } from 'lucide-react-native';
 import { complaintService } from '../../src/services/complaintService';
 import { useAuth } from '../../src/context/AuthContext';
@@ -35,6 +40,7 @@ import { DepartmentBadge } from '../../src/components/DepartmentBadge';
 import { Timeline } from '../../src/components/Timeline';
 import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
+import { Toast, ToastType } from '../../src/components/Toast';
 import { colors, radii, shadows, spacing, typography } from '../../src/theme';
 
 export default function ComplaintDetailScreen() {
@@ -46,7 +52,41 @@ export default function ComplaintDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [commentText, setCommentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    visible: boolean;
+    message: string;
+    type: ToastType;
+  }>({
+    visible: false,
+    message: '',
+    type: 'success',
+  });
+
   const isAdmin = role === 'admin' || user?.role === 'admin';
+
+  // Smart back navigation with fallback if stack history is missing
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace(isAdmin ? '/(admin)/dashboard' : '/(student)/home');
+    }
+  };
+
+  // Hardware back button and swipe back gesture handling for Android
+  useEffect(() => {
+    const onBackPress = () => {
+      handleBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [isAdmin]);
+
+  const showToast = (message: string, type: ToastType = 'success') => {
+    setToast({ visible: true, message, type });
+  };
 
   const fetchDetail = async () => {
     if (!id) return;
@@ -59,6 +99,35 @@ export default function ComplaintDetailScreen() {
   useEffect(() => {
     fetchDetail();
   }, [id]);
+
+  // Attempt reverse-geocoding if coordinates exist
+  useEffect(() => {
+    if (complaint?.latitude && complaint?.longitude) {
+      Location.reverseGeocodeAsync({
+        latitude: Number(complaint.latitude),
+        longitude: Number(complaint.longitude),
+      })
+        .then((places) => {
+          if (places && places.length > 0) {
+            const p = places[0];
+            const parts = [p.name, p.street, p.district, p.city].filter(Boolean);
+            if (parts.length > 0) {
+              setResolvedAddress(parts.join(', '));
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [complaint?.latitude, complaint?.longitude]);
+
+  // Open location coordinates in Maps app
+  const handleOpenMaps = () => {
+    if (!complaint?.latitude || !complaint?.longitude) return;
+    const lat = complaint.latitude;
+    const lng = complaint.longitude;
+    const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    Linking.openURL(url).catch(() => {});
+  };
 
   // Handle Status Update (Admin or quick action)
   const handleStatusChange = async (newStatus: ComplaintStatus) => {
@@ -85,12 +154,12 @@ export default function ComplaintDetailScreen() {
 
       setComplaint(updated);
       setCommentText('');
-      Alert.alert(
-        'Status Updated',
-        `Ticket #${complaint.id} status changed to ${newStatus.replace('_', ' ').toUpperCase()}.`
+      showToast(
+        `Ticket #${complaint.id.slice(0, 8)} status changed to ${newStatus.replace('_', ' ').toUpperCase()}`,
+        'success'
       );
     } catch {
-      Alert.alert('Error', 'Failed to update status.');
+      showToast('Failed to update status. Please try again.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -110,9 +179,9 @@ export default function ComplaintDetailScreen() {
       );
       setComplaint(updated);
       setCommentText('');
-      Alert.alert('Note Added', 'Your note has been added to the ticket history timeline.');
+      showToast('Your note has been added to the ticket history timeline.', 'success');
     } catch {
-      Alert.alert('Error', 'Could not add note.');
+      showToast('Could not add note. Please try again.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -124,9 +193,9 @@ export default function ComplaintDetailScreen() {
     try {
       const updated = await complaintService.reassignDepartment(complaint.id, deptId, deptName);
       setComplaint(updated);
-      Alert.alert('Department Updated', `Reassigned to ${deptName}.`);
+      showToast(`Department reassigned to ${deptName}.`, 'info');
     } catch {
-      Alert.alert('Error', 'Failed to reassign department.');
+      showToast('Failed to reassign department.', 'error');
     }
   };
 
@@ -136,16 +205,16 @@ export default function ComplaintDetailScreen() {
     try {
       const updated = await complaintService.updateComplaintPriority(complaint.id, newSev);
       setComplaint(updated);
-      Alert.alert('Priority Updated', `Priority set to ${newSev.toUpperCase()}.`);
+      showToast(`Priority adjusted to ${newSev.toUpperCase()}.`, 'info');
     } catch {
-      Alert.alert('Error', 'Failed to update priority.');
+      showToast('Failed to update priority.', 'error');
     }
   };
 
   if (loading) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <Header title="Complaint Details" showBack onBack={() => router.back()} />
+        <Header title="Complaint Details" showBack onBack={handleBack} />
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>Loading complaint #{id}...</Text>
@@ -157,13 +226,13 @@ export default function ComplaintDetailScreen() {
   if (!complaint) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <Header title="Complaint Details" showBack onBack={() => router.back()} />
+        <Header title="Complaint Details" showBack onBack={handleBack} />
         <View style={styles.centerContainer}>
           <Text style={styles.errorTitle}>Complaint Not Found</Text>
           <Text style={styles.errorSub}>The complaint ticket #{id} was not found.</Text>
           <Button
             title="Go Back"
-            onPress={() => router.back()}
+            onPress={handleBack}
             variant="outline"
             style={{ marginTop: spacing.md }}
           />
@@ -181,17 +250,25 @@ export default function ComplaintDetailScreen() {
     minute: '2-digit',
   });
 
+  const hasCoordinates =
+    complaint.latitude !== undefined &&
+    complaint.latitude !== null &&
+    !isNaN(complaint.latitude) &&
+    complaint.longitude !== undefined &&
+    complaint.longitude !== null &&
+    !isNaN(complaint.longitude);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <Header
         title={`Ticket #${complaint.id}`}
         subtitle={complaint.department_name}
         showBack
-        onBack={() => router.back()}
+        onBack={handleBack}
       />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Photo View with Badges */}
+        {/* Photo View with Badges & Location Overlay */}
         <View style={styles.imageCard}>
           <Image
             source={{ uri: complaint.image_url }}
@@ -201,6 +278,18 @@ export default function ComplaintDetailScreen() {
           <View style={styles.badgesOverlay}>
             <StatusBadge status={complaint.status} />
             <SeverityBadge severity={complaint.severity} />
+          </View>
+
+          {/* Location Chip on Image */}
+          <View style={styles.imageLocationChip}>
+            <MapPin size={12} color="#FFFFFF" />
+            <Text style={styles.imageLocationChipText} numberOfLines={1}>
+              {complaint.location_name
+                ? complaint.location_name
+                : hasCoordinates
+                ? `GPS: ${Number(complaint.latitude).toFixed(4)}, ${Number(complaint.longitude).toFixed(4)}`
+                : 'Campus Location'}
+            </Text>
           </View>
         </View>
 
@@ -230,15 +319,66 @@ export default function ComplaintDetailScreen() {
             <Text style={styles.metaItemText}>{formattedDate}</Text>
           </View>
 
-          {complaint.location_name ? (
-            <View style={styles.locationBox}>
-              <MapPin size={16} color={colors.primary} />
-              <Text style={styles.locationText}>{complaint.location_name}</Text>
-            </View>
-          ) : null}
-
           <View style={styles.deptRow}>
             <DepartmentBadge name={complaint.department_name} />
+          </View>
+
+          {/* Location Mark Section for Each Complaint */}
+          <View style={styles.locationMarkCard}>
+            <View style={styles.locationMarkHeader}>
+              <View style={styles.locationMarkPill}>
+                <MapPin size={14} color={colors.primary} />
+                <Text style={styles.locationMarkPillText}>Campus Location Mark</Text>
+              </View>
+              {hasCoordinates ? (
+                <View style={styles.gpsVerifiedBadge}>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.gpsVerifiedText}>GPS Captured</Text>
+                </View>
+              ) : (
+                <Text style={styles.locationPendingBadge}>Campus Grounds</Text>
+              )}
+            </View>
+
+            <Text style={styles.locationMainTitle}>
+              {complaint.location_name
+                ? complaint.location_name
+                : hasCoordinates
+                ? 'Captured GPS Site Coordinates'
+                : 'Campus Facilities Zone'}
+            </Text>
+
+            {resolvedAddress ? (
+              <Text style={styles.resolvedAddressText}>📍 {resolvedAddress}</Text>
+            ) : null}
+
+            {hasCoordinates ? (
+              <View style={styles.coordsRow}>
+                <View style={styles.coordPill}>
+                  <Text style={styles.coordLabel}>LAT:</Text>
+                  <Text style={styles.coordValue}>{Number(complaint.latitude).toFixed(6)}</Text>
+                </View>
+                <View style={styles.coordPill}>
+                  <Text style={styles.coordLabel}>LONG:</Text>
+                  <Text style={styles.coordValue}>{Number(complaint.longitude).toFixed(6)}</Text>
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.noCoordsHint}>
+                GPS coordinates were not available during submission (default campus zone applied).
+              </Text>
+            )}
+
+            {hasCoordinates ? (
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={styles.openMapsBtn}
+                onPress={handleOpenMaps}
+              >
+                <ExternalLink size={14} color="#FFFFFF" />
+                <Text style={styles.openMapsBtnText}>Open in Google Maps</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           <Text style={styles.sectionHeader}>Issue Description</Text>
@@ -457,6 +597,13 @@ export default function ComplaintDetailScreen() {
           ) : null}
         </View>
       </ScrollView>
+
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onDismiss={() => setToast((prev) => ({ ...prev, visible: false }))}
+      />
     </SafeAreaView>
   );
 }
@@ -510,6 +657,23 @@ const styles = StyleSheet.create({
     right: spacing.md,
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  imageLocationChip: {
+    position: 'absolute',
+    bottom: spacing.md,
+    left: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    borderRadius: radii.full,
+    gap: 4,
+  },
+  imageLocationChipText: {
+    fontSize: 11,
+    color: '#FFFFFF',
+    fontWeight: typography.weights.medium,
   },
   statusHighlightBox: {
     backgroundColor: colors.surface,

@@ -20,7 +20,15 @@ export default function RootLayout() {
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
           <Stack.Screen name="(student)" options={{ headerShown: false }} />
           <Stack.Screen name="(admin)" options={{ headerShown: false }} />
-          <Stack.Screen name="complaint/[id]" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="complaint/[id]"
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+              fullScreenGestureEnabled: true,
+              animation: 'slide_from_right',
+            }}
+          />
         </Stack>
       </AuthProvider>
     </SafeAreaProvider>

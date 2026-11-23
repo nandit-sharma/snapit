@@ -1,16 +1,50 @@
+
 import { api, apiRequest } from './api';
+import { supabase } from './supabase';
 import { Complaint, ComplaintStatus, Department } from '../types';
 import { mockDepartments } from '../data/mockData';
 
-interface UploadComplaintParams {
+let cachedDepartments: Department[] | null = null;
+let hasWarnedDepartmentFetch = false;
+
+interface AnalyzeComplaintParams {
   imageUri: string;
   latitude?: number | null;
   longitude?: number | null;
 }
 
-interface UploadComplaintResponse {
+export interface AIAnalysis {
+  issue: string;
+  category: string;
+  description: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  confidence: number | null;
+  agent_decisions?: {
+    department: string;
+    routing_reason: string;
+    safety_flag: boolean;
+    requires_urgent_review: boolean;
+    human_review_required: boolean;
+    decision_log?: Record<string, any>;
+  };
+}
+
+export interface AnalyzeComplaintResponse {
   message: string;
-  complaint: Complaint;
+  image_url: string;
+  department_id: string;
+  ai_analysis: AIAnalysis;
+}
+
+interface SubmitComplaintParams {
+  image_url: string;
+  department_id: string;
+  issue_type: string;
+  description: string;
+  severity: string;
+  ai_analysis: AIAnalysis;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 interface ComplaintListResponse {
@@ -28,26 +62,56 @@ interface StatusUpdateResponse {
 }
 
 export const complaintService = {
-  // Get all departments (live from backend with fallback)
+  // Get all departments
   async getDepartments(): Promise<Department[]> {
+    if (cachedDepartments && cachedDepartments.length > 0) {
+      return cachedDepartments;
+    }
+
     try {
       const response = await api.get<{ departments: Department[] }>(
         '/departments',
         false
       );
-      if (response?.departments && response.departments.length > 0) {
-        return response.departments.map((d: any) => ({
+
+      if (response?.departments?.length > 0) {
+        cachedDepartments = response.departments.map((d: any) => ({
           id: d.id,
           name: d.name,
           code: d.name.substring(0, 4).toUpperCase(),
           iconName: 'Wrench',
           activeTicketsCount: 0,
         }));
+
+        return cachedDepartments;
       }
-    } catch (e) {
-      console.warn('Failed to fetch departments from backend, using default list');
+    } catch {
+      try {
+        const { data } = await supabase.from('departments').select('*');
+
+        if (data && data.length > 0) {
+          cachedDepartments = data.map((d: any) => ({
+            id: d.id,
+            name: d.name,
+            code: (d.code || d.name.substring(0, 4)).toUpperCase(),
+            iconName: 'Wrench',
+            activeTicketsCount: 0,
+          }));
+
+          return cachedDepartments;
+        }
+      } catch {
+        // Department sources unavailable
+      }
+
+      if (!hasWarnedDepartmentFetch) {
+        console.warn('Unable to fetch live departments.');
+        hasWarnedDepartmentFetch = true;
+      }
     }
-    return mockDepartments;
+
+    cachedDepartments = mockDepartments;
+    return cachedDepartments;
   },
 
   // Get all complaints (Admin only)
@@ -59,7 +123,7 @@ export const complaintService = {
     return response.complaints;
   },
 
-  // Get complaints belonging to a particular student
+  // Get complaints belonging to a student
   async getUserComplaints(userId: string): Promise<Complaint[]> {
     const response = await api.get<ComplaintListResponse>(
       `/users/${encodeURIComponent(userId)}/complaints`
@@ -68,7 +132,7 @@ export const complaintService = {
     return response.complaints;
   },
 
-  // Get one complaint along with its status history
+  // Get one complaint with its status history
   async getComplaintById(complaintId: string): Promise<Complaint> {
     const [complaint, historyResponse] = await Promise.all([
       api.get<Complaint>(
@@ -85,10 +149,11 @@ export const complaintService = {
     };
   },
 
-  // Upload a complaint photo with optional GPS coordinates
-  async submitComplaint(
-    params: UploadComplaintParams
-  ): Promise<UploadComplaintResponse> {
+  // Stage 1: Upload image and receive AI predictions
+  // This must NOT create a complaint.
+  async analyzeComplaint(
+    params: AnalyzeComplaintParams
+  ): Promise<AnalyzeComplaintResponse> {
     const formData = new FormData();
 
     const filename =
@@ -128,15 +193,23 @@ export const complaintService = {
       formData.append('longitude', String(params.longitude));
     }
 
-    const response = await apiRequest<UploadComplaintResponse>(
-      '/complaints/upload',
+    return apiRequest<AnalyzeComplaintResponse>(
+      '/complaints/analyze',
       {
         method: 'POST',
         body: formData,
       }
     );
+  },
 
-    return response;
+  // Stage 2: Save the student's confirmed or edited complaint
+  async submitComplaint(
+    params: SubmitComplaintParams
+  ): Promise<{ message: string; complaint: Complaint }> {
+    return api.post<{ message: string; complaint: Complaint }>(
+      '/complaints/',
+      params
+    );
   },
 
   // Update complaint status (Admin only)
@@ -157,6 +230,7 @@ export const complaintService = {
     return response.complaint;
   },
 
+  // Update complaint priority (Admin only)
   async updateComplaintPriority(
     complaintId: string,
     severity: string
@@ -165,9 +239,11 @@ export const complaintService = {
       `/admin/complaints/${encodeURIComponent(complaintId)}/priority`,
       { severity }
     );
+
     return response.complaint;
   },
 
+  // Reassign department (Admin only)
   async reassignDepartment(
     complaintId: string,
     departmentId: string,
@@ -177,6 +253,7 @@ export const complaintService = {
       `/admin/complaints/${encodeURIComponent(complaintId)}/department`,
       { department_id: departmentId }
     );
+
     return response.complaint;
   },
 };

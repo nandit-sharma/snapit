@@ -20,6 +20,7 @@ import {
   ChevronRight,
   ArrowUpDown,
   Filter,
+  MapPin,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { complaintService } from '../../src/services/complaintService';
@@ -161,7 +162,19 @@ export default function AdminDashboardScreen() {
           <Text style={styles.dateText}>{formatDate(item.created_at)}</Text>
         </View>
 
-        {/* Line 3: Reporter + ticket id */}
+        {/* Line 3: Location mark */}
+        <View style={styles.rowLocation}>
+          <MapPin size={11} color={colors.primary} />
+          <Text style={styles.locationSmallText} numberOfLines={1}>
+            {item.location_name
+              ? item.location_name
+              : item.latitude && item.longitude
+              ? `GPS: ${Number(item.latitude).toFixed(4)}, ${Number(item.longitude).toFixed(4)}`
+              : 'Campus Location'}
+          </Text>
+        </View>
+
+        {/* Line 4: Reporter + ticket id */}
         <View style={styles.rowBot}>
           {item.userName ? (
             <Text style={styles.reporterText} numberOfLines={1}>👤 {item.userName}</Text>
@@ -570,6 +583,17 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textTertiary,
     flexShrink: 0,
+  },
+  rowLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  locationSmallText: {
+    fontSize: 10,
+    color: colors.primary,
+    fontWeight: typography.weights.medium,
+    flex: 1,
   },
   rowBot: {
     flexDirection: 'row',

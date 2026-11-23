@@ -1,3 +1,4 @@
+
 import { supabase } from './supabase';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -15,14 +16,20 @@ export async function apiRequest<T>(
   options: ApiOptions = {}
 ): Promise<T> {
   if (!API_URL) {
-    throw new Error('Backend URL is not configured. Check your frontend .env file.');
+    throw new Error(
+      'Backend URL is not configured. Check your frontend .env file.'
+    );
   }
 
-  const { requireAuth = true, headers, ...requestOptions } = options;
+  const {
+    requireAuth = true,
+    headers,
+    ...requestOptions
+  } = options;
 
   const requestHeaders = new Headers(headers);
 
-  // Attach the current Supabase access token.
+  // Attach Supabase access token
   if (requireAuth) {
     const { data, error } = await supabase.auth.getSession();
 
@@ -39,34 +46,46 @@ export async function apiRequest<T>(
     requestHeaders.set('Authorization', `Bearer ${token}`);
   }
 
-  // Detect FormData in both standard JS and React Native
+  // Detect FormData in React Native
   const isFormData =
     requestOptions.body instanceof FormData ||
     (requestOptions.body !== null &&
       typeof requestOptions.body === 'object' &&
       '_parts' in (requestOptions.body as any));
 
-  if (!isFormData) {
-    requestHeaders.set('Content-Type', 'application/json');
-  } else {
-    // If multipart/form-data was set manually, remove it so fetch can set the boundary
+  if (isFormData) {
+    // Let fetch set the multipart boundary automatically
     requestHeaders.delete('Content-Type');
+  } else if (requestOptions.body !== undefined) {
+    requestHeaders.set('Content-Type', 'application/json');
   }
 
+  // Build request URL
+  const requestUrl = `${API_URL.replace(/\/$/, '')}${endpoint}`;
+
+  // Temporary debugging logs
+  console.log('API REQUEST:', {
+    url: requestUrl,
+    method: requestOptions.method || 'GET',
+    isFormData,
+  });
+
   let response: Response;
+
   try {
-    response = await fetch(
-      `${API_URL.replace(/\/$/, '')}${endpoint}`,
-      {
-        ...requestOptions,
-        headers: requestHeaders,
-      }
-    );
+    response = await fetch(requestUrl, {
+      ...requestOptions,
+      headers: requestHeaders,
+    });
   } catch (err: any) {
+    console.error('API NETWORK ERROR:', err);
+
     throw new Error(
-      `Cannot reach backend at ${API_URL}. Make sure FastAPI is running on 0.0.0.0:8000 and the phone is on the same Wi-Fi network.`
+      `Cannot reach backend at ${API_URL}. Make sure FastAPI is running on 0.0.0.0:8000 and your phone is connected to the same Wi-Fi network.`
     );
   }
+
+  console.log('API RESPONSE:', response.status, requestUrl);
 
   const responseData = await response.json().catch(() => null);
 
@@ -75,6 +94,12 @@ export async function apiRequest<T>(
       responseData?.detail ||
       responseData?.message ||
       `Request failed with status ${response.status}`;
+
+    console.error('API ERROR:', {
+      status: response.status,
+      url: requestUrl,
+      message,
+    });
 
     throw new Error(message);
   }

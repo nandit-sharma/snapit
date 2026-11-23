@@ -57,14 +57,16 @@ export const ComplaintCard: React.FC<ComplaintCardProps> = ({
             {complaint.issue_type}
           </Text>
 
-          {complaint.location_name ? (
-            <View style={styles.metaLine}>
-              <MapPin size={12} color={colors.textTertiary} />
-              <Text style={styles.metaText} numberOfLines={1}>
-                {complaint.location_name}
-              </Text>
-            </View>
-          ) : null}
+          <View style={styles.metaLine}>
+            <MapPin size={12} color={colors.primary} />
+            <Text style={styles.metaText} numberOfLines={1}>
+              {complaint.location_name
+                ? complaint.location_name
+                : complaint.latitude && complaint.longitude
+                ? `GPS: ${Number(complaint.latitude).toFixed(4)}, ${Number(complaint.longitude).toFixed(4)}`
+                : 'Campus Location'}
+            </Text>
+          </View>
 
           {showUserInfo && complaint.userName ? (
             <Text style={styles.userText} numberOfLines={1}>

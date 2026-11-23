@@ -1,5 +1,7 @@
+
 import logging
 import uuid
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -8,6 +10,7 @@ from fastapi import (
     HTTPException,
     UploadFile,
 )
+from starlette.concurrency import run_in_threadpool
 
 from app.api.dependencies import get_current_user, require_roles
 from app.database.database import supabase
@@ -21,6 +24,8 @@ from app.services.complaint_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/complaints", tags=["Complaints"])
+
+VALID_SEVERITIES = {"low", "medium", "high", "critical"}
 
 
 def authorize_complaint_access(
@@ -46,12 +51,44 @@ def authorize_complaint_access(
     )
 
 
+def get_department_id(department_name: str) -> str:
+    """Find a department ID, falling back to General Maintenance."""
+
+    response = (
+        supabase.table("departments")
+        .select("id")
+        .eq("name", department_name)
+        .limit(1)
+        .execute()
+    )
+
+    if response.data:
+        return response.data[0]["id"]
+
+    fallback = (
+        supabase.table("departments")
+        .select("id")
+        .eq("name", "General Maintenance")
+        .limit(1)
+        .execute()
+    )
+
+    if not fallback.data:
+        raise HTTPException(
+            status_code=500,
+            detail="General Maintenance department not found",
+        )
+
+    return fallback.data[0]["id"]
+
+
 @router.post("/")
 def create_complaint(
     complaint: dict,
     current_user: dict = Depends(require_roles("student")),
 ):
-    """Create a complaint using the authenticated student's identity."""
+    """Create a complaint using the student's confirmed details."""
+
     try:
         allowed_fields = {
             "department_id",
@@ -61,6 +98,8 @@ def create_complaint(
             "description",
             "severity",
             "ai_analysis",
+            "latitude",
+            "longitude",
         }
 
         complaint_data = {
@@ -69,6 +108,57 @@ def create_complaint(
             if key in allowed_fields
         }
 
+        required_fields = {
+            "department_id",
+            "image_url",
+            "issue_type",
+            "description",
+            "severity",
+            "ai_analysis",
+        }
+
+        missing_fields = [
+            field
+            for field in required_fields
+            if complaint_data.get(field) is None
+        ]
+
+        if missing_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required fields: {', '.join(missing_fields)}",
+            )
+
+        severity = str(complaint_data["severity"]).lower().strip()
+
+        if severity not in VALID_SEVERITIES:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid severity. Use low, medium, high, or critical.",
+            )
+
+        if not isinstance(complaint_data["ai_analysis"], dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid AI analysis data",
+            )
+
+        # Verify that the selected department exists.
+        department = (
+            supabase.table("departments")
+            .select("id")
+            .eq("id", complaint_data["department_id"])
+            .limit(1)
+            .execute()
+        )
+
+        if not department.data:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected department does not exist",
+            )
+
+        complaint_data["severity"] = severity
         complaint_data["user_id"] = current_user["id"]
         complaint_data["status"] = "submitted"
 
@@ -87,28 +177,33 @@ def create_complaint(
         saved_complaint = get_complaint(response.data[0]["id"])
 
         return {
-            "message": "Complaint created successfully",
+            "message": "Complaint submitted successfully",
             "complaint": saved_complaint,
         }
 
     except HTTPException:
         raise
     except Exception:
+        logger.exception("Failed to create complaint")
+
         raise HTTPException(
             status_code=500,
             detail="Failed to create complaint",
         )
 
 
-@router.post("/upload")
-async def upload_image(
+@router.post("/analyze")
+async def analyze_complaint_image(
     file: UploadFile = File(...),
-    location_id: str | None = Form(None),
     latitude: float | None = Form(default=None),
     longitude: float | None = Form(default=None),
     current_user: dict = Depends(require_roles("student")),
 ):
-    """Upload an image and create a complaint for the logged-in student."""
+    """
+    Upload an image and generate AI predictions.
+    Does NOT create a complaint.
+    """
+
     try:
         file_data = await file.read()
 
@@ -124,13 +219,26 @@ async def upload_image(
         if "png" in content_type or filename.endswith(".png"):
             ext = "png"
             final_content_type = "image/png"
+
         elif "webp" in content_type or filename.endswith(".webp"):
             ext = "webp"
             final_content_type = "image/webp"
-        else:
+
+        elif (
+            "jpeg" in content_type
+            or "jpg" in content_type
+            or filename.endswith((".jpg", ".jpeg"))
+        ):
             ext = "jpg"
             final_content_type = "image/jpeg"
 
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Only JPEG, PNG and WebP images are supported",
+            )
+
+        # Upload image to Supabase Storage.
         file_path = f"complaints/{uuid.uuid4()}.{ext}"
 
         supabase.storage.from_("complaint-images").upload(
@@ -143,110 +251,56 @@ async def upload_image(
             "complaint-images"
         ).get_public_url(file_path)
 
-        # AI vision analysis and agent orchestration. If Ollama is unavailable,
-        # still save the complaint so it can be reviewed by an administrator.
-        try:
-            ai_analysis = analyze_image(file_data)
-            ai_analysis = process_complaint(ai_analysis)
-        except Exception:
-            logger.exception("AI analysis unavailable; using safe fallback")
-            ai_analysis = {
-                "issue": "Campus maintenance issue",
-                "category": "General Maintenance",
-                "description": "Photo submitted. Pending admin review.",
-                "severity": "medium",
-                "confidence": 0.8,
-                "agent_decisions": {
-                    "department": "General Maintenance",
-                    "routing_reason": "Automated fallback assignment.",
-                    "safety_flag": False,
-                    "requires_urgent_review": False,
-                    "human_review_required": True,
-                    "decision_log": {
-                        "timestamp": uuid.uuid4().hex,
-                        "warnings": ["AI analysis fallback used."],
-                    },
-                },
-            }
+        # Run vision analysis and agent processing outside the async event loop.
+        
+        # Run vision analysis and agent processing outside the async event loop.
+        def run_ai_pipeline():
+            logger.info("STEP 1: Starting Ollama vision analysis")
 
+            vision_result = analyze_image(file_data)
+
+            logger.info(
+                "STEP 2: Vision analysis completed: %s",
+                vision_result,
+            )
+
+            logger.info("STEP 3: Starting agent processing")
+
+            processed_result = process_complaint(vision_result)
+
+            logger.info("STEP 4: Agent processing completed")
+
+            return processed_result
+
+        ai_analysis = await run_in_threadpool(run_ai_pipeline)
+
+
+        # Resolve the AI-recommended department.
         department_name = ai_analysis.get(
-            "category", "General Maintenance"
+            "category",
+            "General Maintenance",
         )
 
-        department_response = (
-            supabase.table("departments")
-            .select("id")
-            .eq("name", department_name)
-            .limit(1)
-            .execute()
-        )
-
-        if department_response.data:
-            department_id = department_response.data[0]["id"]
-        else:
-            fallback = (
-                supabase.table("departments")
-                .select("id")
-                .eq("name", "General Maintenance")
-                .limit(1)
-                .execute()
-            )
-
-            if not fallback.data:
-                raise HTTPException(
-                    status_code=500,
-                    detail="General Maintenance department not found",
-                )
-
-            department_id = fallback.data[0]["id"]
-
-        complaint_data = {
-            "user_id": current_user["id"],
-            "department_id": department_id,
-            "image_url": image_url,
-            "issue_type": ai_analysis.get("issue", "Campus maintenance issue"),
-            "description": ai_analysis.get("description", ""),
-            "severity": str(
-                ai_analysis.get("severity", "medium")
-            ).lower(),
-            "status": "submitted",
-            "ai_analysis": ai_analysis,
-        }
-
-        if location_id:
-            complaint_data["location_id"] = location_id
-        if latitude is not None and not (isinstance(latitude, float) and str(latitude) == "nan"):
-            complaint_data["latitude"] = latitude
-        if longitude is not None and not (isinstance(longitude, float) and str(longitude) == "nan"):
-            complaint_data["longitude"] = longitude
-
-        saved = (
-            supabase.table("complaints")
-            .insert(complaint_data)
-            .execute()
-        )
-
-        if not saved.data:
-            raise HTTPException(
-                status_code=500,
-                detail="Complaint was not saved",
-            )
-
-        saved_complaint = get_complaint(saved.data[0]["id"])
+        department_id = get_department_id(department_name)
 
         return {
-            "message": "Complaint submitted successfully",
-            "complaint": saved_complaint,
+            "message": "Image analyzed successfully",
+            "image_url": image_url,
+            "department_id": department_id,
+            "ai_analysis": ai_analysis,
         }
 
     except HTTPException:
         raise
+
     except Exception:
-        logger.exception("Failed to upload image or process complaint")
+        logger.exception("Failed to upload or analyze complaint image")
+
         raise HTTPException(
             status_code=500,
-            detail="Failed to upload image or process complaint",
+            detail="Failed to upload or analyze complaint image",
         )
+
     finally:
         await file.close()
 
@@ -257,6 +311,7 @@ def complaint_history(
     current_user: dict = Depends(get_current_user),
 ):
     complaint = get_complaint(complaint_id)
+
     authorize_complaint_access(complaint, current_user)
 
     return {
@@ -271,5 +326,7 @@ def complaint_details(
     current_user: dict = Depends(get_current_user),
 ):
     complaint = get_complaint(complaint_id)
+
     authorize_complaint_access(complaint, current_user)
+
     return complaint
