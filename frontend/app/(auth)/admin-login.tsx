@@ -14,15 +14,14 @@ import { ShieldCheck, Mail, Lock, Eye, EyeOff, GraduationCap } from 'lucide-reac
 import { useAuth } from '../../src/context/AuthContext';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
-import { DemoBanner } from '../../src/components/DemoBanner';
 import { colors, radii, spacing, typography } from '../../src/theme';
 
 export default function AdminLoginScreen() {
   const router = useRouter();
   const { loginAdmin, isLoading } = useAuth();
 
-  const [email, setEmail] = useState('admin.facilities@campus.edu');
-  const [password, setPassword] = useState('adminPass2026');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -47,7 +46,6 @@ export default function AdminLoginScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <DemoBanner message="Demo Mode: Preloaded with Facilities Admin credentials." />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.keyboardView}

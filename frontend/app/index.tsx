@@ -5,7 +5,6 @@ import { useAuth } from '../src/context/AuthContext';
 import { colors, spacing, typography, radii } from '../src/theme';
 import { ShieldCheck, GraduationCap, ArrowRight } from 'lucide-react-native';
 import { Button } from '../src/components/Button';
-import { DemoBanner } from '../src/components/DemoBanner';
 
 export default function IndexScreen() {
   const router = useRouter();
@@ -33,8 +32,6 @@ export default function IndexScreen() {
   // Welcome / Entrance Screen if unauthenticated
   return (
     <View style={styles.container}>
-      <DemoBanner message="Academic Project Demonstration • Interactive Mock State" />
-      
       <View style={styles.content}>
         <View style={styles.brandingBox}>
           <View style={styles.logoBadge}>
@@ -65,11 +62,6 @@ export default function IndexScreen() {
             style={styles.portalButton}
           />
 
-          <View style={styles.demoNotice}>
-            <Text style={styles.demoNoticeText}>
-              Preloaded with realistic mock campus data & local AI vision findings.
-            </Text>
-          </View>
         </View>
       </View>
     </View>
@@ -144,17 +136,5 @@ const styles = StyleSheet.create({
   },
   portalButton: {
     marginBottom: spacing.md,
-  },
-  demoNotice: {
-    backgroundColor: colors.surfaceAlt,
-    padding: spacing.sm,
-    borderRadius: radii.sm,
-    marginTop: spacing.xs,
-  },
-  demoNoticeText: {
-    fontSize: typography.sizes.xs,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 16,
   },
 });

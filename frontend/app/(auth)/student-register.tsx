@@ -22,7 +22,6 @@ import {
 import { useAuth } from '../../src/context/AuthContext';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
-import { DemoBanner } from '../../src/components/DemoBanner';
 import { colors, radii, spacing, typography } from '../../src/theme';
 
 export default function StudentRegisterScreen() {
@@ -79,7 +78,6 @@ export default function StudentRegisterScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <DemoBanner message="Demo Mode: Create a temporary mock student session." />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.keyboardView}

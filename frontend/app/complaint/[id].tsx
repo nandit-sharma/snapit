@@ -35,7 +35,6 @@ import { DepartmentBadge } from '../../src/components/DepartmentBadge';
 import { Timeline } from '../../src/components/Timeline';
 import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
-import { DemoBanner } from '../../src/components/DemoBanner';
 import { colors, radii, shadows, spacing, typography } from '../../src/theme';
 
 export default function ComplaintDetailScreen() {
@@ -81,7 +80,7 @@ export default function ComplaintDetailScreen() {
         complaint.id,
         newStatus,
         note,
-        user?.name || (isAdmin ? 'Dr. Nandit (Facilities Admin)' : 'Student User')
+        user?.name || (isAdmin ? 'Facilities Admin' : 'Student')
       );
 
       setComplaint(updated);
@@ -107,7 +106,7 @@ export default function ComplaintDetailScreen() {
         complaint.id,
         complaint.status,
         `Student Note: ${commentText.trim()}`,
-        `${user?.name || 'Nandit Sharma'} (Student)`
+        `${user?.name || 'Student'}`
       );
       setComplaint(updated);
       setCommentText('');
@@ -161,7 +160,7 @@ export default function ComplaintDetailScreen() {
         <Header title="Complaint Details" showBack onBack={() => router.back()} />
         <View style={styles.centerContainer}>
           <Text style={styles.errorTitle}>Complaint Not Found</Text>
-          <Text style={styles.errorSub}>The ticket ID #{id} was not found in local records.</Text>
+          <Text style={styles.errorSub}>The complaint ticket #{id} was not found.</Text>
           <Button
             title="Go Back"
             onPress={() => router.back()}
@@ -190,7 +189,6 @@ export default function ComplaintDetailScreen() {
         showBack
         onBack={() => router.back()}
       />
-      <DemoBanner />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Photo View with Badges */}

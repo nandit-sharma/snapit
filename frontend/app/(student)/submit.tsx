@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,151 +10,224 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import {
   Camera,
   Image as ImageIcon,
   Trash2,
   Sparkles,
   MapPin,
-  Building,
-  AlertTriangle,
-  FileText,
   CheckCircle,
 } from 'lucide-react-native';
-import { useAuth } from '../../src/context/AuthContext';
-import { complaintService, simulateAIVisionAnalysis } from '../../src/services/complaintService';
-import { mockDepartments, mockLocations } from '../../src/data/mockData';
-import { AIAnalysis, ComplaintSeverity } from '../../src/types';
+
+import { complaintService } from '../../src/services/complaintService';
 import { Button } from '../../src/components/Button';
-import { Input } from '../../src/components/Input';
 import { Header } from '../../src/components/Header';
-import { DemoBanner } from '../../src/components/DemoBanner';
 import { colors, radii, spacing, typography } from '../../src/theme';
 
 export default function SubmitComplaintScreen() {
   const router = useRouter();
-  const { user } = useAuth();
 
-  const [imageUri, setImageUri] = useState<string | null>(
-    'https://images.unsplash.com/photo-1555680202-c86f0e12f086?auto=format&fit=crop&w=800&q=80'
-  );
-  const [issueType, setIssueType] = useState('Broken switchboard in 2nd floor corridor');
-  const [departmentId, setDepartmentId] = useState(mockDepartments[0].id);
-  const [locationName, setLocationName] = useState('Hostel Block C - 2nd Floor Corridor');
-  const [description, setDescription] = useState(
-    'Switch plate has cracked open with exposed wiring. Needs immediate repair.'
-  );
-  const [severity, setSeverity] = useState<ComplaintSeverity>('high');
-  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationLoading, setLocationLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isAnalyzingAI, setIsAnalyzingAI] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  // Camera pick
+  // Restore any pending camera result every time this screen gains focus.
+  // On Android, Expo Go's JS engine can be killed while the native camera
+  // activity is open (memory pressure). getPendingResultAsync() retrieves
+  // the captured photo when the app resumes. Using useFocusEffect (not
+  // useEffect) ensures this runs every time we come back to this screen,
+  // not just on first mount.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const restorePendingImage = async () => {
+        try {
+          const pending = (await ImagePicker.getPendingResultAsync()) as any;
+          if (
+            active &&
+            pending &&
+            !pending.error &&
+            !pending.canceled &&
+            Array.isArray(pending.assets) &&
+            pending.assets.length > 0
+          ) {
+            const firstAsset = pending.assets[0];
+            if (firstAsset?.uri) {
+              setImageUri(firstAsset.uri);
+              setErrorMessage('');
+            }
+          }
+        } catch (err) {
+          // Not critical — ignore silently
+        }
+      };
+
+      restorePendingImage();
+      return () => { active = false; };
+    }, [])
+  );
+
+  // Capture a photo using the camera
   const pickFromCamera = async () => {
     try {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      const permission =
+        await ImagePicker.requestCameraPermissionsAsync();
+
       if (!permission.granted) {
-        Alert.alert('Permission Denied', 'Camera permission is required to capture photos.');
+        Alert.alert(
+          'Permission Denied',
+          'Camera permission is required to capture photos.'
+        );
         return;
       }
 
+      // Setting allowsEditing to false prevents Android from launching a heavy cropper activity
+      // which kills Expo Go due to OS memory constraints.
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
+        allowsEditing: false,
+        quality: 0.7,
       });
 
-      if (!result.canceled && result.assets[0].uri) {
+      if (!result.canceled && result.assets && result.assets.length > 0) {
         setImageUri(result.assets[0].uri);
-        triggerAIAnalysis(result.assets[0].uri);
+        setErrorMessage('');
       }
-    } catch {
-      Alert.alert('Camera Error', 'Could not open camera on this device/simulator.');
+    } catch (err: any) {
+      console.warn('Camera error:', err);
+      Alert.alert(
+        'Camera Notice',
+        'Could not open camera directly. You can also pick a photo from your gallery.'
+      );
     }
   };
 
-  // Gallery pick
+  // Select a photo from the gallery
   const pickFromGallery = async () => {
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
       if (!permission.granted) {
-        Alert.alert('Permission Denied', 'Gallery permission is required to select photos.');
+        Alert.alert(
+          'Permission Denied',
+          'Gallery permission is required to select photos.'
+        );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
+        allowsEditing: false,
+        quality: 0.7,
       });
 
-      if (!result.canceled && result.assets[0].uri) {
+      if (!result.canceled && result.assets && result.assets.length > 0) {
         setImageUri(result.assets[0].uri);
-        triggerAIAnalysis(result.assets[0].uri);
+        setErrorMessage('');
       }
-    } catch {
-      Alert.alert('Gallery Error', 'Could not open image library.');
+    } catch (err: any) {
+      console.warn('Gallery error:', err);
+      Alert.alert(
+        'Gallery Notice',
+        'Could not open the image library.'
+      );
     }
   };
 
-  // Trigger simulated AI Vision Analysis
-  const triggerAIAnalysis = (uri?: string) => {
-    setIsAnalyzingAI(true);
-    setTimeout(() => {
-      const dept = mockDepartments.find((d) => d.id === departmentId);
-      const analysis = simulateAIVisionAnalysis(dept?.name);
-      setAiAnalysis(analysis);
-      setSeverity(analysis.severity);
-      if (!issueType.trim()) {
-        setIssueType(analysis.issue);
+  // Capture the current GPS coordinates safely without blocking submission
+  const captureGPSLocation = async (): Promise<{ latitude: number | null; longitude: number | null }> => {
+    try {
+      setLocationLoading(true);
+
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        return { latitude: null, longitude: null };
       }
-      setIsAnalyzingAI(false);
-    }, 800);
+
+      // Try fast last-known position first, then try fresh position with 5s timeout
+      const lastKnown = await Location.getLastKnownPositionAsync().catch(() => null);
+      if (lastKnown) {
+        setLatitude(lastKnown.coords.latitude);
+        setLongitude(lastKnown.coords.longitude);
+      }
+
+      const locationPromise = Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 5000)
+      );
+
+      const location = await Promise.race([locationPromise, timeoutPromise]);
+
+      if (location && 'coords' in location) {
+        const lat = location.coords.latitude;
+        const long = location.coords.longitude;
+        setLatitude(lat);
+        setLongitude(long);
+        return { latitude: lat, longitude: long };
+      }
+
+      if (lastKnown) {
+        return {
+          latitude: lastKnown.coords.latitude,
+          longitude: lastKnown.coords.longitude,
+        };
+      }
+
+      return { latitude: null, longitude: null };
+    } catch {
+      return { latitude: null, longitude: null };
+    } finally {
+      setLocationLoading(false);
+    }
   };
 
+  // Submit the complaint to the backend
   const handleSubmit = async () => {
     setErrorMessage('');
+
     if (!imageUri) {
-      setErrorMessage('Please capture or select an image of the issue.');
+      setErrorMessage(
+        'Please capture or select an image of the campus issue.'
+      );
       return;
     }
-    if (!issueType.trim()) {
-      setErrorMessage('Please enter a brief issue title.');
-      return;
-    }
-    if (!locationName.trim()) {
-      setErrorMessage('Please provide the location.');
-      return;
-    }
+
+    if (isSubmitting) return;
 
     setIsSubmitting(true);
+
     try {
+      const gps = await captureGPSLocation();
+
       const result = await complaintService.submitComplaint({
-        userId: user?.id || 'usr-student-001',
-        userName: user?.name || 'Nandit Sharma',
-        userEmail: user?.email || 'student@campus.edu',
-        departmentId,
-        locationName,
         imageUri,
-        issueType,
-        description,
-        severity,
-        simulateAI: true,
+        latitude: gps.latitude,
+        longitude: gps.longitude,
       });
 
+      const complaint = result.complaint;
+      const severity =
+        complaint.ai_analysis?.severity || complaint.severity || 'medium';
+
       Alert.alert(
-        'Complaint Registered! (Demo Mode)',
-        `Ticket ${result.complaint.id} has been submitted with AI Vision classification: ${result.aiAnalysis.severity.toUpperCase()} severity.`,
+        'Complaint Registered!',
+        `Your complaint has been submitted successfully.\n\nTicket ID: ${complaint.id}\nAI-detected severity: ${String(severity).toUpperCase()}`,
         [
           {
-            text: 'View Ticket Details',
-            onPress: () => router.replace(`/complaint/${result.complaint.id}` as any),
+            text: 'View Complaint',
+            onPress: () =>
+              router.replace(`/complaint/${complaint.id}` as any),
           },
           {
             text: 'Back to Dashboard',
@@ -162,8 +235,11 @@ export default function SubmitComplaintScreen() {
           },
         ]
       );
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to submit complaint.');
+    } catch (error: any) {
+      console.warn('Upload error:', error);
+      setErrorMessage(
+        error?.message || 'Failed to submit complaint. Please check your connection and try again.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -171,8 +247,10 @@ export default function SubmitComplaintScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Header title="Report Campus Issue" subtitle="AI-Powered Defect Identification" />
-      <DemoBanner message="Demo Submission: Saves into local state & simulates Ollama Vision triage." />
+      <Header
+        title="Report Campus Issue"
+        subtitle="AI-Powered Defect Identification"
+      />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -190,21 +268,32 @@ export default function SubmitComplaintScreen() {
 
           {/* Photo Section */}
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Photo Proof of Issue *</Text>
+            <Text style={styles.sectionLabel}>
+              Photo Proof of Issue *
+            </Text>
+
             {imageUri ? (
               <View style={styles.imagePreviewContainer}>
-                <Image source={{ uri: imageUri }} style={styles.imagePreview} resizeMode="cover" />
+                <Image
+                  source={{ uri: imageUri }}
+                  style={styles.imagePreview}
+                  resizeMode="cover"
+                />
+
                 <View style={styles.imageActionOverlay}>
                   <TouchableOpacity
                     style={styles.actionPill}
                     onPress={pickFromCamera}
+                    disabled={isSubmitting}
                   >
                     <Camera size={14} color="#FFFFFF" />
                     <Text style={styles.actionPillText}>Retake</Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[styles.actionPill, styles.removePill]}
                     onPress={() => setImageUri(null)}
+                    disabled={isSubmitting}
                   >
                     <Trash2 size={14} color="#FFFFFF" />
                     <Text style={styles.actionPillText}>Remove</Text>
@@ -213,179 +302,107 @@ export default function SubmitComplaintScreen() {
               </View>
             ) : (
               <View style={styles.pickerBox}>
-                <Text style={styles.pickerTitle}>No photo captured yet</Text>
-                <Text style={styles.pickerSub}>
-                  Upload clear image showing the fault or hazard
+                <Text style={styles.pickerTitle}>
+                  No photo captured yet
                 </Text>
+
+                <Text style={styles.pickerSub}>
+                  Upload a clear image showing the campus fault or hazard.
+                </Text>
+
                 <View style={styles.pickerBtnRow}>
                   <TouchableOpacity
                     activeOpacity={0.8}
                     onPress={pickFromCamera}
                     style={styles.pickerBtn}
+                    disabled={isSubmitting}
                   >
                     <Camera size={20} color={colors.primary} />
-                    <Text style={styles.pickerBtnText}>Use Camera</Text>
+                    <Text style={styles.pickerBtnText}>
+                      Use Camera
+                    </Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
                     activeOpacity={0.8}
                     onPress={pickFromGallery}
                     style={[styles.pickerBtn, styles.galleryBtn]}
+                    disabled={isSubmitting}
                   >
-                    <ImageIcon size={20} color={colors.textPrimary} />
-                    <Text style={styles.pickerBtnTextDark}>Choose Gallery</Text>
+                    <ImageIcon
+                      size={20}
+                      color={colors.textPrimary}
+                    />
+                    <Text style={styles.pickerBtnTextDark}>
+                      Choose Gallery
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
             )}
+          </View>
 
-            {/* AI Vision Preview Trigger */}
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => triggerAIAnalysis()}
-              disabled={isAnalyzingAI}
-              style={styles.aiTriggerBtn}
-            >
-              <Sparkles size={16} color={colors.aiBadge} />
-              <Text style={styles.aiTriggerText}>
-                {isAnalyzingAI
-                  ? 'Simulating Ollama Vision Analysis...'
-                  : aiAnalysis
-                  ? 'Re-run AI Vision Assessment'
-                  : 'Run AI Vision Pre-Screening (Local Model)'}
+          {/* AI Information */}
+          <View style={styles.aiInfoCard}>
+            <View style={styles.aiInfoHeader}>
+              <Sparkles size={18} color={colors.aiBadge} />
+              <Text style={styles.aiInfoTitle}>
+                AI-Powered Issue Detection
               </Text>
-            </TouchableOpacity>
+            </View>
 
-            {aiAnalysis ? (
-              <View style={styles.aiResultCard}>
-                <View style={styles.aiResultHeader}>
-                  <Sparkles size={14} color={colors.aiBadge} />
-                  <Text style={styles.aiResultTitle}>Ollama Vision Detection</Text>
-                  <Text style={styles.aiConfidence}>
-                    {Math.round((aiAnalysis.confidence || 0.9) * 100)}% match
-                  </Text>
-                </View>
-                <Text style={styles.aiResultBody}>{aiAnalysis.description}</Text>
-                <View style={styles.aiTagsRow}>
-                  {aiAnalysis.detected_objects?.map((obj, i) => (
-                    <View key={i} style={styles.detectedObjBadge}>
-                      <Text style={styles.detectedObjText}>{obj}</Text>
-                    </View>
-                  ))}
-                </View>
-                <Text style={styles.aiSuggestedAction}>
-                  Recommended Action: {aiAnalysis.recommended_action}
+            <Text style={styles.aiInfoDescription}>
+              After submission, our AI vision service will analyze
+              your photograph and automatically identify the issue,
+              generate its description, determine severity, and route
+              to the appropriate campus department.
+            </Text>
+          </View>
+
+          {/* GPS Location */}
+          <View style={styles.locationCard}>
+            <View style={styles.locationHeader}>
+              <MapPin size={19} color={colors.primary} />
+
+              <View style={styles.locationTextContainer}>
+                <Text style={styles.locationTitle}>
+                  Automatic GPS Location
+                </Text>
+
+                <Text style={styles.locationDescription}>
+                  Your current coordinates will be automatically recorded during submission.
                 </Text>
               </View>
-            ) : null}
-          </View>
-
-          {/* Form Fields */}
-          <Input
-            label="Issue Summary / Title"
-            required
-            placeholder="e.g. Water leaking under sink"
-            value={issueType}
-            onChangeText={setIssueType}
-            leftIcon={<FileText size={18} color={colors.textTertiary} />}
-          />
-
-          {/* Department Selector */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Department *</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.deptScroll}>
-              {mockDepartments.map((dept) => {
-                const isSelected = dept.id === departmentId;
-                return (
-                  <TouchableOpacity
-                    key={dept.id}
-                    onPress={() => setDepartmentId(dept.id)}
-                    style={[styles.deptChip, isSelected && styles.deptChipSelected]}
-                  >
-                    <Building size={14} color={isSelected ? '#FFFFFF' : colors.textSecondary} />
-                    <Text style={[styles.deptChipText, isSelected && styles.deptChipTextSelected]}>
-                      {dept.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          {/* Location Input with quick suggestions */}
-          <Input
-            label="Specific Location on Campus"
-            required
-            placeholder="e.g. Hostel Block C - 2nd Floor Room 210"
-            value={locationName}
-            onChangeText={setLocationName}
-            leftIcon={<MapPin size={18} color={colors.textTertiary} />}
-          />
-          <View style={styles.presetLocations}>
-            <Text style={styles.presetLabel}>Quick Select:</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {mockLocations.slice(0, 4).map((loc) => (
-                <TouchableOpacity
-                  key={loc.id}
-                  onPress={() => setLocationName(loc.name)}
-                  style={styles.presetPill}
-                >
-                  <Text style={styles.presetPillText}>{loc.name.split('-')[0].trim()}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Description */}
-          <Input
-            label="Detailed Description"
-            placeholder="Describe what you observed, potential hazards, and how long it has been present..."
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            numberOfLines={4}
-            style={styles.multilineInput}
-          />
-
-          {/* Priority / Severity */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Priority Severity (AI Recommended)</Text>
-            <View style={styles.severityRow}>
-              {(['low', 'medium', 'high', 'critical'] as ComplaintSeverity[]).map((lvl) => {
-                const isSelected = severity === lvl;
-                return (
-                  <TouchableOpacity
-                    key={lvl}
-                    onPress={() => setSeverity(lvl)}
-                    style={[
-                      styles.severityOption,
-                      isSelected && styles.severityOptionSelected,
-                      lvl === 'critical' && isSelected && { borderColor: colors.severityCritical },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.severityOptionText,
-                        isSelected && styles.severityOptionTextSelected,
-                        lvl === 'critical' && isSelected && { color: colors.severityCritical },
-                      ]}
-                    >
-                      {lvl.toUpperCase()}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
             </View>
+
+            {locationLoading ? (
+              <Text style={styles.locationStatus}>
+                Fetching your location...
+              </Text>
+            ) : latitude !== null && longitude !== null ? (
+              <Text style={styles.locationStatus}>
+                Location detected: {latitude.toFixed(6)}, {longitude.toFixed(6)}
+              </Text>
+            ) : (
+              <Text style={styles.locationPending}>
+                GPS coordinates will be captured when submitting.
+              </Text>
+            )}
           </View>
 
           {/* Submit Button */}
           <Button
-            title="Submit Complaint (Demo)"
+            title="Submit Complaint"
             onPress={handleSubmit}
-            loading={isSubmitting}
+            loading={isSubmitting || locationLoading}
             variant="primary"
             icon={<CheckCircle size={18} color="#FFFFFF" />}
             style={styles.submitBtn}
           />
+
+          <Text style={styles.footerNote}>
+            Your photograph and coordinates will be submitted for campus complaint resolution.
+          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -506,156 +523,75 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontWeight: typography.weights.semibold,
   },
-  aiTriggerBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.aiBadgeBg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.md,
-    marginTop: spacing.sm,
-    justifyContent: 'center',
-    gap: spacing.xs + 2,
-  },
-  aiTriggerText: {
-    fontSize: typography.sizes.xs + 1,
-    color: colors.aiBadge,
-    fontWeight: typography.weights.semibold,
-  },
-  aiResultCard: {
+  aiInfoCard: {
     backgroundColor: '#FAF5FF',
     borderWidth: 1,
     borderColor: '#E9D5FF',
     borderRadius: radii.md,
     padding: spacing.md,
-    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
   },
-  aiResultHeader: {
+  aiInfoHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
   },
-  aiResultTitle: {
-    fontSize: typography.sizes.xs + 1,
-    fontWeight: typography.weights.bold,
-    color: colors.aiBadge,
-    flex: 1,
-  },
-  aiConfidence: {
-    fontSize: typography.sizes.xs - 1,
+  aiInfoTitle: {
+    fontSize: typography.sizes.sm,
     fontWeight: typography.weights.bold,
     color: colors.aiBadge,
   },
-  aiResultBody: {
+  aiInfoDescription: {
     fontSize: typography.sizes.xs + 1,
     color: colors.textSecondary,
-    lineHeight: 18,
-    marginBottom: spacing.xs,
+    lineHeight: 19,
   },
-  aiTagsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginBottom: spacing.xs,
-  },
-  detectedObjBadge: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E9D5FF',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radii.xs,
-  },
-  detectedObjText: {
-    fontSize: 10,
-    color: colors.aiBadge,
-    fontWeight: typography.weights.medium,
-  },
-  aiSuggestedAction: {
-    fontSize: typography.sizes.xs,
-    color: colors.textPrimary,
-    fontWeight: typography.weights.medium,
-    marginTop: 2,
-  },
-  deptScroll: {
-    flexDirection: 'row',
-  },
-  deptChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  locationCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.full,
-    marginRight: spacing.sm,
-    gap: spacing.xs,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
   },
-  deptChipSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  deptChipText: {
-    fontSize: typography.sizes.xs + 1,
-    color: colors.textSecondary,
-    fontWeight: typography.weights.medium,
-  },
-  deptChipTextSelected: {
-    color: '#FFFFFF',
-    fontWeight: typography.weights.semibold,
-  },
-  presetLocations: {
-    marginTop: -spacing.xs,
-    marginBottom: spacing.md,
-  },
-  presetLabel: {
-    fontSize: typography.sizes.xs - 1,
-    color: colors.textTertiary,
-    marginBottom: 4,
-  },
-  presetPill: {
-    backgroundColor: colors.surfaceAlt,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radii.full,
-    marginRight: spacing.xs,
-  },
-  presetPillText: {
-    fontSize: typography.sizes.xs - 1,
-    color: colors.textSecondary,
-  },
-  multilineInput: {
-    height: 90,
-    textAlignVertical: 'top',
-  },
-  severityRow: {
+  locationHeader: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: spacing.sm,
   },
-  severityOption: {
+  locationTextContainer: {
     flex: 1,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.md,
-    alignItems: 'center',
   },
-  severityOptionSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primarySoft,
+  locationTitle: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    color: colors.textPrimary,
+    marginBottom: 3,
   },
-  severityOptionText: {
-    fontSize: typography.sizes.xs - 1,
-    fontWeight: typography.weights.bold,
+  locationDescription: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  locationStatus: {
+    fontSize: typography.sizes.xs,
+    color: colors.success || colors.primary,
+    marginTop: spacing.sm,
+  },
+  locationPending: {
+    fontSize: typography.sizes.xs,
     color: colors.textTertiary,
-  },
-  severityOptionTextSelected: {
-    color: colors.primary,
+    marginTop: spacing.sm,
   },
   submitBtn: {
+    marginTop: spacing.md,
+  },
+  footerNote: {
+    fontSize: typography.sizes.xs,
+    color: colors.textTertiary,
+    textAlign: 'center',
+    lineHeight: 18,
     marginTop: spacing.md,
   },
 });

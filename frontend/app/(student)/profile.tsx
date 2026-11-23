@@ -11,50 +11,21 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  User,
   Mail,
   GraduationCap,
   Building,
   Home,
-  Shield,
-  RotateCcw,
   LogOut,
-  ChevronRight,
   Info,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/context/AuthContext';
-import { complaintService } from '../../src/services/complaintService';
 import { Header } from '../../src/components/Header';
 import { Button } from '../../src/components/Button';
-import { DemoBanner } from '../../src/components/DemoBanner';
 import { colors, radii, shadows, spacing, typography } from '../../src/theme';
 
 export default function StudentProfileScreen() {
   const router = useRouter();
-  const { user, logout, switchRoleQuickDemo } = useAuth();
-
-  const handleSwitchToAdmin = () => {
-    switchRoleQuickDemo('admin');
-    router.replace('/(admin)/dashboard');
-  };
-
-  const handleResetData = () => {
-    Alert.alert(
-      'Reset Mock Data',
-      'This will reset all complaints and status changes back to the original demo dataset.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset',
-          style: 'destructive',
-          onPress: () => {
-            complaintService.resetMockData();
-            Alert.alert('Data Reset', 'Default campus complaints restored.');
-          },
-        },
-      ]
-    );
-  };
+  const { user, logout } = useAuth();
 
   const handleLogout = async () => {
     await logout();
@@ -64,7 +35,6 @@ export default function StudentProfileScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <Header title="Student Profile" subtitle="Campus Identity & Settings" />
-      <DemoBanner />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Profile Card */}
@@ -79,8 +49,8 @@ export default function StudentProfileScreen() {
             )}
 
             <View style={styles.nameCol}>
-              <Text style={styles.name}>{user?.name || 'Nandit Sharma'}</Text>
-              <Text style={styles.rollNumber}>{user?.rollNumber || 'CS2023-042'}</Text>
+              <Text style={styles.name}>{user?.name || 'Student'}</Text>
+              <Text style={styles.rollNumber}>{user?.rollNumber || user?.email || ''}</Text>
               <View style={styles.roleTag}>
                 <Text style={styles.roleTagText}>ENROLLED STUDENT</Text>
               </View>
@@ -93,69 +63,30 @@ export default function StudentProfileScreen() {
             <View style={styles.infoRow}>
               <Mail size={16} color={colors.textTertiary} />
               <Text style={styles.infoLabel}>Email:</Text>
-              <Text style={styles.infoVal}>{user?.email || 'Nandit.sharma@campus.edu'}</Text>
+              <Text style={styles.infoVal}>{user?.email || 'Not provided'}</Text>
             </View>
 
             <View style={styles.infoRow}>
               <Building size={16} color={colors.textTertiary} />
               <Text style={styles.infoLabel}>Department:</Text>
-              <Text style={styles.infoVal}>{user?.department || 'Computer Science & Engineering'}</Text>
+              <Text style={styles.infoVal}>{user?.department || 'Not specified'}</Text>
             </View>
 
             <View style={styles.infoRow}>
               <Home size={16} color={colors.textTertiary} />
               <Text style={styles.infoLabel}>Hostel / Room:</Text>
               <Text style={styles.infoVal}>
-                {user?.hostelBlock || 'Block C (Aryabhata)'} • {user?.roomNumber || 'Room 304'}
+                {user?.hostelBlock || 'Campus'}{user?.roomNumber ? ` • Room ${user.roomNumber}` : ''}
               </Text>
             </View>
           </View>
-        </View>
-
-        {/* Demo Presentation Shortcuts */}
-        <View style={styles.demoSection}>
-          <Text style={styles.sectionHeader}>Demo Testing Tools</Text>
-
-          {/* Quick switch to Admin portal */}
-          <TouchableOpacity
-            activeOpacity={0.75}
-            onPress={handleSwitchToAdmin}
-            style={styles.actionTile}
-          >
-            <View style={[styles.tileIconBox, { backgroundColor: colors.primarySoft }]}>
-              <Shield size={20} color={colors.primary} />
-            </View>
-            <View style={styles.tileContent}>
-              <Text style={styles.tileTitle}>Switch to Admin Portal</Text>
-              <Text style={styles.tileSub}>
-                Test administrative triage, review AI confidence, and update complaint status
-              </Text>
-            </View>
-            <ChevronRight size={18} color={colors.textTertiary} />
-          </TouchableOpacity>
-
-          {/* Reset Mock Data */}
-          <TouchableOpacity
-            activeOpacity={0.75}
-            onPress={handleResetData}
-            style={styles.actionTile}
-          >
-            <View style={[styles.tileIconBox, { backgroundColor: '#F1F5F9' }]}>
-              <RotateCcw size={20} color={colors.textSecondary} />
-            </View>
-            <View style={styles.tileContent}>
-              <Text style={styles.tileTitle}>Reset Mock Complaints Data</Text>
-              <Text style={styles.tileSub}>Restore initial 5 campus sample tickets</Text>
-            </View>
-            <ChevronRight size={18} color={colors.textTertiary} />
-          </TouchableOpacity>
         </View>
 
         {/* About App Box */}
         <View style={styles.aboutBox}>
           <Info size={16} color={colors.primary} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.aboutTitle}>SnapIT Campus v1.0.0 (UI Prototype)</Text>
+            <Text style={styles.aboutTitle}>SnapIT Campus v1.0.0</Text>
             <Text style={styles.aboutText}>
               Frontend built with React Native, Expo, TypeScript & Lucide Icons. Designed for seamless integration with FastAPI backend and Ollama Vision.
             </Text>

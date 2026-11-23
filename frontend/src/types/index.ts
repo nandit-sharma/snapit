@@ -1,10 +1,12 @@
-export type UserRole = 'student' | 'admin' | 'staff';
+
+export type UserRole = 'student' | 'admin';
 
 export interface UserProfile {
   id: string;
   name: string;
   email: string;
   role: UserRole;
+  authUserId?: string;
   rollNumber?: string;
   department?: string;
   hostelBlock?: string;
@@ -13,7 +15,13 @@ export interface UserProfile {
   phone?: string;
 }
 
-export type ComplaintStatus = 'submitted' | 'in_progress' | 'resolved' | 'rejected';
+export type ComplaintStatus =
+  | 'submitted'
+  | 'under_review'
+  | 'assigned'
+  | 'in_progress'
+  | 'resolved'
+  | 'rejected';
 
 export type ComplaintSeverity = 'low' | 'medium' | 'high' | 'critical';
 
@@ -31,10 +39,12 @@ export interface AIAnalysis {
 export interface ComplaintHistoryItem {
   id: string;
   complaint_id: string;
-  status: ComplaintStatus;
+  status?: ComplaintStatus;        // normalised by backend (new_status → status)
+  old_status?: string;             // raw DB field
+  new_status?: string;             // raw DB field
   comment?: string;
   updated_by: string;
-  updated_by_role?: 'admin' | 'staff' | 'system';
+  updated_by_role?: 'admin' | 'system';
   created_at: string;
 }
 
@@ -47,6 +57,8 @@ export interface Complaint {
   department_name: string;
   location_id?: string;
   location_name?: string;
+  latitude?: number;
+  longitude?: number;
   image_url: string;
   issue_type: string;
   description: string;

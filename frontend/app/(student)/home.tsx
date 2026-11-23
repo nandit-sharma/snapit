@@ -24,16 +24,16 @@ import {
 } from 'lucide-react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { complaintService } from '../../src/services/complaintService';
-import { Complaint } from '../../src/types';
-import { DemoBanner } from '../../src/components/DemoBanner';
 import { ComplaintCard } from '../../src/components/ComplaintCard';
 import { colors, radii, shadows, spacing, typography } from '../../src/theme';
 
 export default function StudentHomeScreen() {
   const router = useRouter();
-  const { user, switchRoleQuickDemo } = useAuth();
+  const { user } = useAuth();
 
-  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [complaints, setComplaints] = useState<
+    Awaited<ReturnType<typeof complaintService.getUserComplaints>>
+  >([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = async () => {
@@ -62,26 +62,6 @@ export default function StudentHomeScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* Quick Role Switcher Banner */}
-      <View style={styles.topRoleBanner}>
-        <View style={styles.roleIdentity}>
-          <GraduationCap size={16} color="#FFFFFF" />
-          <Text style={styles.roleIdentityText}>STUDENT PORTAL</Text>
-        </View>
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => {
-            switchRoleQuickDemo('admin');
-            router.replace('/(admin)/dashboard');
-          }}
-          style={styles.switchRolePill}
-        >
-          <ShieldCheck size={14} color={colors.primaryDark} />
-          <Text style={styles.switchRolePillText}>Switch to Admin Portal</Text>
-        </TouchableOpacity>
-      </View>
-
-      <DemoBanner />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -94,7 +74,7 @@ export default function StudentHomeScreen() {
             <Text style={styles.greeting}>Welcome back,</Text>
             <Text style={styles.userName}>{user?.name || 'Student'}</Text>
             <Text style={styles.userMeta}>
-              {user?.rollNumber || 'CS2023-042'} • {user?.hostelBlock || 'Hostel Block C'}
+              {user?.rollNumber ? `${user.rollNumber} • ` : ''}{user?.department || user?.hostelBlock || 'Enrolled Student'}
             </Text>
           </View>
           {user?.avatarUrl ? (

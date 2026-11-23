@@ -63,7 +63,9 @@ export const Timeline: React.FC<TimelineProps> = ({ items }) => {
 
               <View style={styles.statusPill}>
                 <Text style={styles.statusPillText}>
-                  {item.status.replace('_', ' ').toUpperCase()}
+                  {((item.status || (item as any).new_status || (item as any).old_status || 'pending') as string)
+                    .replace(/_/g, ' ')
+                    .toUpperCase()}
                 </Text>
               </View>
 

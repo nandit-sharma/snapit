@@ -14,15 +14,14 @@ import { Mail, Lock, GraduationCap, Eye, EyeOff, Shield } from 'lucide-react-nat
 import { useAuth } from '../../src/context/AuthContext';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
-import { DemoBanner } from '../../src/components/DemoBanner';
 import { colors, radii, spacing, typography } from '../../src/theme';
 
 export default function StudentLoginScreen() {
   const router = useRouter();
   const { loginStudent, isLoading } = useAuth();
 
-  const [email, setEmail] = useState('Nandit.sharma@campus.edu');
-  const [password, setPassword] = useState('demo12345');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -47,7 +46,6 @@ export default function StudentLoginScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <DemoBanner message="Demo Mode: Preloaded with student mock account. Tap Login to test." />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.keyboardView}

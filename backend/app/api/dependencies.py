@@ -35,13 +35,39 @@ def get_current_user(
             .execute()
         )
 
+        user_data = None
         if not response.data:
-            raise HTTPException(
-                status_code=403,
-                detail="No user profile is linked to this account",
+            meta = auth_user.user_metadata or {}
+            role = meta.get("role", "student")
+            name = meta.get("name") or (auth_user.email.split("@")[0] if auth_user.email else "Student")
+            inserted = (
+                supabase.table("users")
+                .insert({
+                    "auth_user_id": str(auth_user.id),
+                    "name": name,
+                    "email": auth_user.email,
+                    "role": role,
+                })
+                .execute()
             )
+            if inserted.data:
+                user_data = inserted.data[0]
+            else:
+                raise HTTPException(
+                    status_code=403,
+                    detail="No user profile is linked to this account",
+                )
+        else:
+            user_data = response.data[0]
 
-        return response.data[0]
+        meta = auth_user.user_metadata or {}
+        user_dict = dict(user_data)
+        user_dict["roll_number"] = meta.get("roll_number")
+        user_dict["department"] = meta.get("department")
+        user_dict["hostel_block"] = meta.get("hostel_block")
+        user_dict["room_number"] = meta.get("room_number")
+
+        return user_dict
 
     except HTTPException:
         raise

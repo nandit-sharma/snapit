@@ -4,16 +4,17 @@ import { Tag } from 'lucide-react-native';
 import { colors, radii, spacing, typography } from '../theme';
 
 interface DepartmentBadgeProps {
-  name: string;
+  name?: string;
   size?: 'sm' | 'md';
 }
 
 export const DepartmentBadge: React.FC<DepartmentBadgeProps> = ({ name, size = 'md' }) => {
   const isSm = size === 'sm';
+  const label = name || 'General Maintenance';
   return (
     <View style={[styles.badge, isSm && styles.badgeSm]}>
       <Tag size={isSm ? 10 : 12} color={colors.primary} style={styles.icon} />
-      <Text style={[styles.text, isSm && styles.textSm]}>{name}</Text>
+      <Text style={[styles.text, isSm && styles.textSm]}>{label}</Text>
     </View>
   );
 };

@@ -43,7 +43,7 @@ def analyze_image(image_data: bytes) -> dict:
                 "temperature": 0,
             },
         },
-        timeout=180,
+        timeout=(3.0, 30.0),
     )
 
     response.raise_for_status()

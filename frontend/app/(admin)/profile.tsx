@@ -14,45 +14,17 @@ import {
   ShieldCheck,
   Mail,
   Building,
-  RotateCcw,
   LogOut,
-  ChevronRight,
-  GraduationCap,
   Info,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/context/AuthContext';
-import { complaintService } from '../../src/services/complaintService';
 import { Header } from '../../src/components/Header';
 import { Button } from '../../src/components/Button';
-import { DemoBanner } from '../../src/components/DemoBanner';
 import { colors, radii, shadows, spacing, typography } from '../../src/theme';
 
 export default function AdminProfileScreen() {
   const router = useRouter();
-  const { user, logout, switchRoleQuickDemo } = useAuth();
-
-  const handleSwitchToStudent = () => {
-    switchRoleQuickDemo('student');
-    router.replace('/(student)/home');
-  };
-
-  const handleResetData = () => {
-    Alert.alert(
-      'Reset Mock Data',
-      'This will restore all campus complaints and history logs to the starting demo dataset.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset Dataset',
-          style: 'destructive',
-          onPress: () => {
-            complaintService.resetMockData();
-            Alert.alert('Data Reset', 'All campus tickets have been reset.');
-          },
-        },
-      ]
-    );
-  };
+  const { user, logout } = useAuth();
 
   const handleLogout = async () => {
     await logout();
@@ -65,7 +37,6 @@ export default function AdminProfileScreen() {
         title="Admin Profile"
         subtitle="Facilities Administration"
       />
-      <DemoBanner />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Profile Card */}
@@ -80,8 +51,8 @@ export default function AdminProfileScreen() {
             )}
 
             <View style={styles.nameCol}>
-              <Text style={styles.name}>{user?.name || 'Dr. Nandit'}</Text>
-              <Text style={styles.roleTitle}>Director of Campus Infrastructure</Text>
+              <Text style={styles.name}>{user?.name || 'Administrator'}</Text>
+              <Text style={styles.roleTitle}>Campus Infrastructure Management</Text>
               <View style={styles.roleTag}>
                 <Text style={styles.roleTagText}>FACILITIES ADMINISTRATOR</Text>
               </View>
@@ -95,7 +66,7 @@ export default function AdminProfileScreen() {
               <Mail size={16} color={colors.textTertiary} />
               <Text style={styles.infoLabel}>Official Email:</Text>
               <Text style={styles.infoVal}>
-                {user?.email || 'admin.facilities@campus.edu'}
+                {user?.email || 'admin@campus.edu'}
               </Text>
             </View>
 
@@ -105,45 +76,6 @@ export default function AdminProfileScreen() {
               <Text style={styles.infoVal}>Campus Estate & Services Directorate</Text>
             </View>
           </View>
-        </View>
-
-        {/* Demo Controls */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader}>Demo Testing Tools</Text>
-
-          <TouchableOpacity
-            activeOpacity={0.75}
-            onPress={handleSwitchToStudent}
-            style={styles.actionTile}
-          >
-            <View style={[styles.tileIconBox, { backgroundColor: colors.primarySoft }]}>
-              <GraduationCap size={20} color={colors.primary} />
-            </View>
-            <View style={styles.tileContent}>
-              <Text style={styles.tileTitle}>Switch to Student Portal</Text>
-              <Text style={styles.tileSub}>
-                Test complaint submission with camera, gallery, and student status view
-              </Text>
-            </View>
-            <ChevronRight size={18} color={colors.textTertiary} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            activeOpacity={0.75}
-            onPress={handleResetData}
-            style={styles.actionTile}
-          >
-            <View style={[styles.tileIconBox, { backgroundColor: '#F1F5F9' }]}>
-              <RotateCcw size={20} color={colors.textSecondary} />
-            </View>
-            <View style={styles.tileContent}>
-              <Text style={styles.tileTitle}>Reset All Demo Tickets</Text>
-              <Text style={styles.tileSub}>
-                Clear custom changes and restore clean presentation tickets
-              </Text>
-            </View>
-            <ChevronRight size={18} color={colors.textTertiary} />
-          </TouchableOpacity>
         </View>
 
         {/* System Architecture Notice */}

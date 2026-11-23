@@ -18,13 +18,33 @@
       "adaptiveIcon": {
         "backgroundColor": "#0F172A"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SnapIT needs access to your photos so you can attach evidence to campus complaints.",
+          "cameraPermission": "SnapIT needs access to your camera so you can take photos of maintenance issues."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "SnapIT uses your location to record the location of reported issues on campus."
+        }
+      ]
     ]
   }
 }

@@ -1,6 +1,7 @@
-import { mockCurrentUserAdmin, mockCurrentUserStudent } from '../data/mockData';
 import { UserProfile, UserRole } from '../types';
 import { isSupabaseConfigured, supabase } from './supabase';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 export interface AuthResponse {
   user: UserProfile;
@@ -8,49 +9,95 @@ export interface AuthResponse {
   isMock: boolean;
 }
 
-/**
- * Authentication Service
- * Currently runs with interactive local mock state.
- * Structured cleanly to swap with real Supabase Auth calls when configured.
- */
+interface BackendUser {
+  id: string;
+  auth_user_id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  roll_number?: string;
+  department?: string;
+  hostel_block?: string;
+  room_number?: string;
+}
+
+async function fetchBackendUser(token: string): Promise<UserProfile> {
+  if (!API_URL) {
+    throw new Error('Backend API URL is not configured.');
+  }
+
+  const response = await fetch(`${API_URL.replace(/\/$/, '')}/auth/me`, {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.detail || 'Unable to verify user with backend.');
+  }
+
+  const backendUser = data as BackendUser;
+
+  if (!['student', 'admin'].includes(backendUser.role)) {
+    throw new Error('Invalid user role.');
+  }
+
+  return {
+    id: backendUser.id,
+    email: backendUser.email,
+    name: backendUser.name,
+    role: backendUser.role,
+    rollNumber: backendUser.roll_number,
+    department: backendUser.department,
+    hostelBlock: backendUser.hostel_block,
+    roomNumber: backendUser.room_number,
+  };
+}
+
+async function getAuthenticatedUser(): Promise<AuthResponse> {
+  const { data, error } = await supabase.auth.getSession();
+
+  if (error) throw new Error(error.message);
+
+  const token = data.session?.access_token;
+
+  if (!token) {
+    throw new Error('No active session. Please log in again.');
+  }
+
+  const user = await fetchBackendUser(token);
+
+  return {
+    user,
+    token,
+    isMock: false,
+  };
+}
+
 export const authService = {
   async loginStudent(email: string, password: string): Promise<AuthResponse> {
-    // If Supabase is configured and not in mock demo mode:
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw new Error(error.message);
-      return {
-        user: {
-          id: data.user.id,
-          email: data.user.email || email,
-          name: data.user.user_metadata?.name || 'Campus Student',
-          role: 'student',
-          rollNumber: data.user.user_metadata?.roll_number,
-          department: data.user.user_metadata?.department,
-        },
-        token: data.session?.access_token,
-        isMock: false,
-      };
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase is not configured.');
     }
 
-    // Mock validation
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    if (!email || !password) {
-      throw new Error('Please provide both email and password.');
+    if (error) throw new Error(error.message);
+
+    const result = await getAuthenticatedUser();
+
+    if (result.user.role !== 'student') {
+      await supabase.auth.signOut();
+      throw new Error('This account is not registered as a student.');
     }
 
-    return {
-      user: {
-        ...mockCurrentUserStudent,
-        email: email.trim().toLowerCase(),
-      },
-      token: 'demo-mock-student-token-2026',
-      isMock: true,
-    };
+    return result;
   },
 
   async registerStudent(params: {
@@ -62,90 +109,74 @@ export const authService = {
     hostelBlock?: string;
     roomNumber?: string;
   }): Promise<AuthResponse> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.auth.signUp({
-        email: params.email,
-        password: params.password,
-        options: {
-          data: {
-            name: params.name,
-            role: 'student',
-            roll_number: params.rollNumber,
-            department: params.department,
-          },
-        },
-      });
-      if (error) throw new Error(error.message);
-      return {
-        user: {
-          id: data.user?.id || 'new-user',
-          email: params.email,
-          name: params.name,
-          role: 'student',
-          rollNumber: params.rollNumber,
-          department: params.department,
-        },
-        token: data.session?.access_token,
-        isMock: false,
-      };
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase is not configured.');
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    return {
-      user: {
-        id: `usr-student-${Date.now()}`,
-        name: params.name,
-        email: params.email,
-        role: 'student',
-        rollNumber: params.rollNumber,
-        department: params.department,
-        hostelBlock: params.hostelBlock || 'Hostel Block A',
-        roomNumber: params.roomNumber || 'Room 101',
+    const { data, error } = await supabase.auth.signUp({
+      email: params.email,
+      password: params.password,
+      options: {
+        data: {
+          name: params.name,
+          role: 'student',
+          roll_number: params.rollNumber,
+          department: params.department,
+          hostel_block: params.hostelBlock,
+          room_number: params.roomNumber,
+        },
       },
-      token: 'demo-mock-student-token-new',
-      isMock: true,
-    };
+    });
+
+    if (error) throw new Error(error.message);
+
+    if (!data.session) {
+      throw new Error(
+        'Registration successful. Please verify your email, then log in.'
+      );
+    }
+
+    return getAuthenticatedUser();
   },
 
   async loginAdmin(email: string, password: string): Promise<AuthResponse> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw new Error(error.message);
-      return {
-        user: {
-          id: data.user.id,
-          email: data.user.email || email,
-          name: data.user.user_metadata?.name || 'Administrator',
-          role: 'admin',
-        },
-        token: data.session?.access_token,
-        isMock: false,
-      };
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase is not configured.');
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    if (!email || !password) {
-      throw new Error('Please enter admin credentials.');
+    if (error) throw new Error(error.message);
+
+    const result = await getAuthenticatedUser();
+
+    if (result.user.role !== 'admin') {
+      await supabase.auth.signOut();
+      throw new Error('This account does not have administrator access.');
     }
 
-    return {
-      user: {
-        ...mockCurrentUserAdmin,
-        email: email.trim().toLowerCase(),
-      },
-      token: 'demo-mock-admin-token-2026',
-      isMock: true,
-    };
+    return result;
+  },
+
+  async restoreSession(): Promise<AuthResponse | null> {
+    if (!isSupabaseConfigured) return null;
+
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) throw new Error(error.message);
+
+    if (!data.session) return null;
+
+    return getAuthenticatedUser();
   },
 
   async logout(): Promise<void> {
     if (isSupabaseConfigured) {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+      if (error) throw new Error(error.message);
     }
   },
 };

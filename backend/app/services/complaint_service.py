@@ -1,6 +1,4 @@
-
 from fastapi import HTTPException
-
 from app.database.database import supabase
 
 VALID_STATUSES = {
@@ -12,11 +10,29 @@ VALID_STATUSES = {
     "rejected",
 }
 
+SELECT_FIELDS = "*, departments(id, name), users!complaints_user_id_fkey(name, email)"
+
+
+def format_complaint(c: dict) -> dict:
+    if not isinstance(c, dict):
+        return c
+    dept = c.get("departments")
+    user = c.get("users")
+    if isinstance(dept, dict) and "name" in dept:
+        c["department_name"] = dept["name"]
+    elif "department_name" not in c or not c["department_name"]:
+        c["department_name"] = "General Maintenance"
+
+    if isinstance(user, dict):
+        c["userName"] = user.get("name")
+        c["userEmail"] = user.get("email")
+    return c
+
 
 def get_complaint(complaint_id: str) -> dict:
     response = (
         supabase.table("complaints")
-        .select("*")
+        .select(SELECT_FIELDS)
         .eq("id", complaint_id)
         .limit(1)
         .execute()
@@ -28,23 +44,22 @@ def get_complaint(complaint_id: str) -> dict:
             detail="Complaint not found",
         )
 
-    return response.data[0]
+    return format_complaint(response.data[0])
 
 
 def get_user_complaints(user_id: str) -> list:
     response = (
         supabase.table("complaints")
-        .select("*")
+        .select(SELECT_FIELDS)
         .eq("user_id", user_id)
         .order("created_at", desc=True)
         .execute()
     )
 
-    return response.data
+    return [format_complaint(c) for c in (response.data or [])]
 
 
 def get_complaint_history(complaint_id: str) -> list:
-    # Confirm the complaint exists first.
     get_complaint(complaint_id)
 
     response = (
@@ -55,7 +70,20 @@ def get_complaint_history(complaint_id: str) -> list:
         .execute()
     )
 
-    return response.data
+    rows = response.data or []
+
+    # Normalise each history row so the frontend receives a `status` field.
+    # The DB stores old_status / new_status; the app Timeline expects `status`.
+    normalised = []
+    for row in rows:
+        new_s = row.get("new_status") or row.get("old_status") or "submitted"
+        normalised.append({
+            **row,
+            "status": new_s,
+            # Keep old_status / new_status as well for future use
+        })
+
+    return normalised
 
 
 def update_complaint_status(
@@ -73,10 +101,9 @@ def update_complaint_status(
     current = get_complaint(complaint_id)
     old_status = current["status"]
 
-    if old_status == new_status:
+    if old_status == new_status and not comment:
         return current
 
-    # Update the complaint first.
     updated = (
         supabase.table("complaints")
         .update({"status": new_status})
@@ -90,7 +117,6 @@ def update_complaint_status(
             detail="Failed to update complaint status",
         )
 
-    # Record the status change.
     try:
         supabase.table("complaint_updates").insert({
             "complaint_id": complaint_id,
@@ -100,8 +126,6 @@ def update_complaint_status(
             "comment": comment,
         }).execute()
     except Exception as exc:
-        # The complaint status has already changed. Make the partial
-        # success explicit instead of pretending the history was saved.
         raise HTTPException(
             status_code=500,
             detail=(
@@ -110,4 +134,4 @@ def update_complaint_status(
             ),
         ) from exc
 
-    return updated.data[0]
+    return get_complaint(complaint_id)

@@ -19,7 +19,6 @@ import { Input } from '../../src/components/Input';
 import { FilterChips } from '../../src/components/FilterChips';
 import { ComplaintCard } from '../../src/components/ComplaintCard';
 import { EmptyState } from '../../src/components/EmptyState';
-import { DemoBanner } from '../../src/components/DemoBanner';
 import { colors, radii, spacing, typography } from '../../src/theme';
 
 export default function MyComplaintsScreen() {
@@ -104,7 +103,6 @@ export default function MyComplaintsScreen() {
           </TouchableOpacity>
         }
       />
-      <DemoBanner message="Student Tickets: Tap any card to open full details, status & history." />
 
       {/* Search Input */}
       <View style={styles.searchContainer}>
